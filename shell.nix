@@ -13,7 +13,6 @@
       python3
       darwin.apple_sdk.framworks.OpenCL
       m4
-      rust-analyzer
     ]
     else
     [
@@ -27,7 +26,6 @@
       python3
       ocl-icd 
       m4
-      rust-analyzer
     ];
     RUSTC_VERSION = pkgs.lib.readFile ./rust-toolchain;
     # https://github.com/rust-lang/rust-bindgen#environment-variables
