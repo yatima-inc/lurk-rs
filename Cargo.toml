@@ -62,9 +62,13 @@ harness = false
 
 [workspace]
 members = [
-  "lurk_macro", "fcomm"
+  "lurk_macro", "fcomm", "lurk_ff", "ldon"
 ]
 
 [[bin]]
 name = "lurkrs"
 path = "src/main.rs"
+
+[profile.test]
+opt-level = 3
+
