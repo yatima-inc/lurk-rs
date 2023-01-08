@@ -19,8 +19,8 @@
 
         toolchain = with fenix.packages.${system}; toolchainOf {
           channel = "nightly";
-          date = "2022-01-08";
-          sha256 = "sha256-8brI/cS6bOV6QswJIwjqbIc4/MM79jOfQY5kAda8Mo8=";
+          date = "2023-01-08";
+          sha256 = "sha256-/F36bL5WoJ7opVs7o96dwVHE9SEt3am+6N3jPygJRKY=";
         };
           dev-toolchain = toolchain.withComponents [
             "cargo" "rustc" "rust-src" "rustfmt" "clippy"
@@ -29,8 +29,8 @@
       in rec {
         # For `nix build` & `nix run`:
         defaultPackage = (naersk.lib.${system}.override {
-          cargo = toolchain;
-          rustc = toolchain;
+          cargo = toolchain.rust;
+          rustc = toolchain.rust;
         }).buildPackage {
           src = ./.;
           CARGO_BUILD_TARGET = target;
