@@ -8,6 +8,17 @@ extern crate quickcheck_macros;
 pub mod field;
 pub mod tag;
 
+pub use field::{
+  FWrap,
+  LurkField,
+};
+pub use tag::{
+  ExprTag,
+  FieldTag,
+  Tag,
+  Version,
+};
+
 #[cfg(all(test, not(feature = "test-utils")))]
 pub mod test {
   // This shouldn't ever run since "test-utils" is set in Cargo

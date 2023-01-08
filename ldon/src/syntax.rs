@@ -11,6 +11,34 @@ use crate::{
   store::Store,
 };
 
+#[derive(Clone, Debug)]
+pub enum Ldon<F: LurkField> {
+  // A field element: 1, 0xff
+  Num(F),
+  // A u64 integer: 1u64, 0xffu64
+  U64(u64),
+  // A hierarchical symbol: foo, foo.bar.baz
+  Symbol(Vec<String>),
+  // A hierarchical keyword: :lambda, :lurk:lambda
+  Keyword(Vec<String>),
+  // A string literal: "foobar", "foo\nbar"
+  String(String),
+  // A character literal: 'a', 'b', '\n'
+  Char(char),
+  // A cons-list of expressions, which can be terminated by nil: (1 2 3)
+  // or can be terminated with the right-most expression (1, 2, 3)
+  List(Vec<Ldon<F>>, Option<Box<Ldon<F>>>),
+  // Cons(Box<Ldon<F>>, Box<Ldon<F>>),
+  // List(Vec<Ldon<F>>),
+  // Tuple(Vec<Ldon<F>>, Box<Ldon<F>>, Box<Ldon<F>>),
+  // A map of expressions to expressions: { foo = 1, blue = true, 3 = 4 }
+  Map(Vec<(Ldon<F>, Ldon<F>)>),
+  // A contextual link or descriptor of some piece of foreign data:
+  // [sha256 0xffff_ffff_ffff_ffff 0xffff_ffff_ffff_ffff 0xffff_ffff_ffff_ffff
+  // 0xffff_ffff_ffff_ffff]
+  Link(Box<Ldon<F>>, Vec<u64>),
+}
+
 // LDON syntax
 #[derive(Clone, Debug)]
 pub enum Syn<F: LurkField> {
@@ -220,7 +248,7 @@ impl<F: LurkField> Eq for Syn<F> {}
 pub mod test_utils {
   use blstrs::Scalar as Fr;
   use lurk_ff::{
-    field::test_utils::FWrap,
+    field::FWrap,
     test_utils::frequency,
   };
   use quickcheck::{

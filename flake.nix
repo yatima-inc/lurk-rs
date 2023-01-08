@@ -2,45 +2,49 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     naersk.url = "github:nix-community/naersk";
-
-    nixpkgs-mozilla = {
-      url = "github:mozilla/nixpkgs-mozilla";
-      flake = false;
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
+
   };
 
-  outputs = { self, flake-utils, naersk, nixpkgs, nixpkgs-mozilla }:
+  outputs = { self, fenix, flake-utils, naersk, nixpkgs }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs) {
           inherit system;
+        };
+        target = "aarch64-unknown-linux-gnu";
 
-          overlays = [
-            (import nixpkgs-mozilla)
+        toolchain = with fenix.packages.${system}; toolchainOf {
+          channel = "nightly";
+          date = "2022-01-08";
+          sha256 = "sha256-8brI/cS6bOV6QswJIwjqbIc4/MM79jOfQY5kAda8Mo8=";
+        };
+          dev-toolchain = toolchain.withComponents [
+            "cargo" "rustc" "rust-src" "rustfmt" "clippy"
           ];
-        };
-
-        toolchain = (pkgs.rustChannelOf {
-          rustToolchain = ./rust-toolchain;
-          sha256 = "sha256-R6uGJG/aH25t3CEXyD28m4b7HRYvjtCqzRtfBqIFfi4=";
-          #        ^ After you run `nix build`, replace this with the actual
-          #          hash from the error message
-        }).rust;
-
-        naersk' = pkgs.callPackage naersk {
-          cargo = toolchain;
-          rustc = toolchain;
-        };
 
       in rec {
         # For `nix build` & `nix run`:
-        defaultPackage = naersk'.buildPackage {
+        defaultPackage = (naersk.lib.${system}.override {
+          cargo = toolchain;
+          rustc = toolchain;
+        }).buildPackage {
           src = ./.;
+          CARGO_BUILD_TARGET = target;
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER =
+            "${pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc}/bin/${target}-gcc";
         };
 
         # For `nix develop` (optional, can be skipped):
         devShell = pkgs.mkShell {
-          nativeBuildInputs = [ toolchain ];
+          nativeBuildInputs = [
+            dev-toolchain
+            toolchain.rust-analyzer
+          ];
+          #RUST_SRC_PATH = "${toolchain.rust-src}/lib/rustlib/src/rust/library";
         };
       }
     );

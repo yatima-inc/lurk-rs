@@ -5,14 +5,10 @@ use std::{
 
 use lurk_ff::{
   field::LurkField,
-  tag::{
-    ExprTag,
-    TagKind,
-  },
+  tag::ExprTag,
 };
 
 use crate::{
-  cont::Cont,
   expr::Expr,
   hash::PoseidonCache,
   parser::position::Pos,
@@ -30,7 +26,6 @@ pub struct Store<F: LurkField>(BTreeMap<Ptr<F>, Entry<F>>);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<F: LurkField> {
   Expr(Expr<F>),
-  Cont(Cont<F>),
   Opaque,
 }
 
@@ -56,7 +51,7 @@ impl<F: LurkField> Store<F> {
     expr: Expr<F>,
   ) -> Ptr<F> {
     let ptr = expr.ptr(cache);
-    if ptr.immediate_expr().is_none() {
+    if ptr.immediate().is_none() {
       self.0.insert(ptr, Entry::Expr(expr));
     }
     ptr
@@ -71,7 +66,7 @@ impl<F: LurkField> Store<F> {
 
     for c in string.chars().rev() {
       let char_ptr =
-        Ptr { tag: F::make_expr_tag(ExprTag::Char), val: F::from_char(c) };
+        Ptr { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
       ptr = self.intern_expr(cache, Expr::StrCons(char_ptr, ptr));
     }
     ptr
@@ -177,11 +172,8 @@ impl<F: LurkField> Store<F> {
   }
 
   pub fn get_entry(&self, ptr: Ptr<F>) -> Result<Entry<F>, StoreError<F>> {
-    if let Some(expr) = ptr.immediate_expr() {
+    if let Some(expr) = ptr.immediate() {
       Ok(Entry::Expr(expr))
-    }
-    else if let Some(cont) = ptr.immediate_cont() {
-      Ok(Entry::Cont(cont))
     }
     else {
       let entry = self.0.get(&ptr).ok_or(StoreError::UnknownPtr(ptr))?;
@@ -192,32 +184,14 @@ impl<F: LurkField> Store<F> {
   pub fn get_expr(&self, ptr: Ptr<F>) -> Result<Expr<F>, StoreError<F>> {
     match self.get_entry(ptr)? {
       Entry::Expr(x) => Ok(x),
-      Entry::Cont(x) => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Cont(x), "Expr"))
-      },
       Entry::Opaque => {
         Err(StoreError::UnexpectedEntry(ptr, Entry::Opaque, "Expr"))
       },
     }
   }
 
-  pub fn get_cont(&self, ptr: Ptr<F>) -> Result<Cont<F>, StoreError<F>> {
-    match self.get_entry(ptr)? {
-      Entry::Cont(x) => Ok(x),
-      Entry::Expr(x) => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Expr(x), "Cont"))
-      },
-      Entry::Opaque => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Opaque, "Cont"))
-      },
-    }
-  }
-
   pub fn get_opaque(&self, ptr: Ptr<F>) -> Result<(), StoreError<F>> {
     match self.get_entry(ptr)? {
-      Entry::Cont(x) => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Cont(x), "Opaque"))
-      },
       Entry::Expr(x) => {
         Err(StoreError::UnexpectedEntry(ptr, Entry::Expr(x), "Opaque"))
       },
@@ -362,9 +336,6 @@ impl<F: LurkField> fmt::Display for Store<F> {
         Entry::Expr(x) => {
           writeln!(f, "  {}: {},", k, x)?;
         },
-        Entry::Cont(x) => {
-          writeln!(f, "  {}: {:?},", k, x)?;
-        },
         Entry::Opaque => {
           writeln!(f, "  {}: _,", k)?;
         },
@@ -378,19 +349,16 @@ impl<F: LurkField> fmt::Display for Store<F> {
 impl<F: LurkField> SerdeF<F> for Store<F> {
   fn ser_f(&self) -> Vec<F> {
     let mut exprs = Vec::new();
-    let mut conts = Vec::new();
     let mut opaqs = Vec::new();
     for (ptr, entry) in self.0.iter() {
       match entry {
         Entry::Expr(x) => exprs.extend(x.ser_f().into_iter()),
-        Entry::Cont(x) => conts.extend(x.ser_f().into_iter()),
         Entry::Opaque => opaqs.extend(ptr.ser_f()),
       }
     }
     let mut res = vec![(opaqs.len() as u64).into()];
     res.extend(opaqs);
     res.extend(exprs);
-    res.extend(conts);
     res
   }
 
@@ -415,24 +383,9 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
     }
     while i < fs.len() {
       let ptr = Ptr::de_f(&fs[i..])?;
-      match ptr.tag.kind {
-        TagKind::Expr(_) => {
-          let expr = Expr::de_f(&fs[i..])?;
-          map.insert(ptr, Entry::Expr(expr));
-          i += 2 + expr.child_ptrs().len() * 2;
-        },
-        TagKind::Cont(_) => {
-          let cont = Cont::de_f(&fs[i..])?;
-          map.insert(ptr, Entry::Cont(cont));
-          i += 2 + cont.child_ptrs().len() * 2;
-        },
-        TagKind::Op1(_) => {
-          return Err(SerdeFError::Custom("Invalid Op1 Entry".to_string()))
-        },
-        TagKind::Op2(_) => {
-          return Err(SerdeFError::Custom("Invalid Op2 Entry".to_string()))
-        },
-      }
+      let expr = Expr::de_f(&fs[i..])?;
+      map.insert(ptr, Entry::Expr(expr));
+      i += 2 + expr.child_ptrs().len() * 2;
     }
     Ok(Store(map))
   }
@@ -453,7 +406,6 @@ pub mod test_utils {
       let input: Vec<(i64, Box<dyn Fn(&mut Gen) -> Entry<Fr>>)> = vec![
         (100, Box::new(|_| Self::Opaque)),
         (100, Box::new(|g| Self::Expr(Expr::arbitrary(g)))),
-        (100, Box::new(|g| Self::Cont(Cont::arbitrary(g)))),
       ];
       frequency(g, input)
     }
@@ -469,7 +421,6 @@ pub mod test_utils {
         match entry {
           Entry::Opaque => map.insert(Ptr::arbitrary(g), entry),
           Entry::Expr(x) => map.insert(x.ptr(&cache), entry),
-          Entry::Cont(x) => map.insert(x.ptr(&cache), entry),
         };
       }
       Store(map)

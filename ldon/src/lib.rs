@@ -7,9 +7,9 @@ extern crate quickcheck_macros;
 
 extern crate lurk_ff;
 
-pub mod cont;
 pub mod expr;
 pub mod hash;
+pub mod op;
 pub mod parser;
 pub mod ptr;
 pub mod serde_f;
@@ -17,6 +17,18 @@ pub mod store;
 pub mod syntax;
 #[macro_use]
 pub mod macros;
+
+pub use expr::Expr;
+pub use hash::PoseidonCache;
+pub use neptune::{
+  poseidon::PoseidonConstants,
+  Poseidon,
+};
+pub use ptr::Ptr;
+pub use store::{
+  Store,
+  StoreError,
+};
 
 #[cfg(all(test, not(feature = "test-utils")))]
 pub mod test {

@@ -1,18 +1,25 @@
-use std::fmt;
+use std::{
+  fmt,
+  hash::Hash,
+};
 
 use lurk_ff::{
-  field::LurkField,
+  field::{
+    FWrap,
+    LurkField,
+  },
   tag::{
-    ContTag,
     ExprTag,
     Tag,
-    TagKind,
   },
 };
 
 use crate::{
-  cont::Cont,
   expr::Expr,
+  op::{
+    Op1,
+    Op2,
+  },
   serde_f::{
     SerdeF,
     SerdeFError,
@@ -25,56 +32,61 @@ pub struct Ptr<F: LurkField> {
   pub val: F,
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
+impl<F: LurkField> Hash for Ptr<F> {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.tag.hash(state);
+    FWrap(self.val).hash(state);
+  }
+}
+
 impl<F: LurkField> Ptr<F> {
-  pub fn immediate_expr(self) -> Option<Expr<F>> {
-    match self.tag.kind {
-      TagKind::Expr(ExprTag::Num) => Some(Expr::Num(self.val)),
-      TagKind::Expr(ExprTag::Char) => Some(Expr::Char(self.val)),
-      TagKind::Expr(ExprTag::U64) => Some(Expr::U64(self.val)),
-      TagKind::Expr(ExprTag::Str) if self.val == F::zero() => {
-        Some(Expr::StrNil)
-      },
-      TagKind::Expr(ExprTag::Cons) if self.val == F::zero() => {
-        Some(Expr::ConsNil)
-      },
-      TagKind::Expr(ExprTag::Sym) if self.val == F::zero() => {
-        Some(Expr::SymNil)
-      },
+  pub fn immediate(self) -> Option<Expr<F>> {
+    match self.tag.expr {
+      ExprTag::Num => Some(Expr::Num(self.val)),
+      ExprTag::Char => Some(Expr::Char(self.val)),
+      ExprTag::U64 => Some(Expr::U64(self.val)),
+      ExprTag::Str if self.val == F::zero() => Some(Expr::StrNil),
+      ExprTag::Cons if self.val == F::zero() => Some(Expr::ConsNil),
+      ExprTag::Sym if self.val == F::zero() => Some(Expr::SymNil),
+      ExprTag::Outermost => Some(Expr::Outermost),
+      ExprTag::Error => Some(Expr::Error),
+      ExprTag::Dummy => Some(Expr::Dummy),
+      ExprTag::Terminal => Some(Expr::Terminal),
+      ExprTag::Op1 => Some(Expr::Op1(Op1::try_from(self.val.to_u16()?).ok()?)),
+      ExprTag::Op2 => Some(Expr::Op2(Op2::try_from(self.val.to_u16()?).ok()?)),
       _ => None,
     }
   }
 
-  pub fn immediate_cont(self) -> Option<Cont<F>> {
-    match self.tag.kind {
-      TagKind::Cont(ContTag::Outermost) => Some(Cont::Outermost),
-      TagKind::Cont(ContTag::Error) => Some(Cont::Error),
-      TagKind::Cont(ContTag::Dummy) => Some(Cont::Dummy),
-      TagKind::Cont(ContTag::Terminal) => Some(Cont::Terminal),
-      _ => None,
-    }
-  }
-
-  pub fn is_immediate(self) -> bool {
-    self.immediate_expr().is_some()
-      || self.immediate_cont().is_some()
-      || matches!(self.tag.kind, TagKind::Op1(_) | TagKind::Op2(_))
-  }
+  pub fn is_immediate(self) -> bool { self.immediate().is_some() }
 
   pub fn child_ptr_arity(self) -> usize {
-    if self.immediate_expr().is_some() {
+    if self.immediate().is_some() {
       0
     }
     else {
-      match self.tag.kind {
-        TagKind::Expr(ExprTag::Cons) => 2,
-        TagKind::Expr(ExprTag::Sym) => 2,
-        TagKind::Expr(ExprTag::Fun) => 3,
-        TagKind::Expr(ExprTag::Thunk) => 2,
-        TagKind::Expr(ExprTag::Str) => 2,
-        TagKind::Expr(ExprTag::Comm) => 2,
-        TagKind::Expr(ExprTag::Key) => 1,
-        TagKind::Expr(ExprTag::Map) => 1,
-        TagKind::Expr(ExprTag::Link) => 2,
+      match self.tag.expr {
+        ExprTag::Cons => 2,
+        ExprTag::Sym => 2,
+        ExprTag::Fun => 3,
+        ExprTag::Thunk => 2,
+        ExprTag::Str => 2,
+        ExprTag::Comm => 2,
+        ExprTag::Key => 1,
+        ExprTag::Map => 1,
+        ExprTag::Link => 2,
+        ExprTag::Call => 3,
+        ExprTag::Call0 => 2,
+        ExprTag::Call2 => 3,
+        ExprTag::Tail => 2,
+        ExprTag::Unop => 2,
+        ExprTag::Binop => 4,
+        ExprTag::Binop2 => 3,
+        ExprTag::If => 2,
+        ExprTag::Let => 4,
+        ExprTag::LetRec => 4,
+        ExprTag::Emit => 1,
         _ => 0,
       }
     }
@@ -109,7 +121,7 @@ impl<F: LurkField> Ord for Ptr<F> {
 
 impl<F: LurkField> fmt::Display for Ptr<F> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "{}", self.tag.kind)?;
+    write!(f, "{}", self.tag.expr)?;
     write!(f, "{}", self.val.hex_digits())
   }
 }
@@ -131,7 +143,7 @@ impl<F: LurkField> SerdeF<F> for Ptr<F> {
 #[cfg(feature = "test-utils")]
 pub mod test_utils {
   use blstrs::Scalar as Fr;
-  use lurk_ff::field::test_utils::FWrap;
+  use lurk_ff::field::FWrap;
   use quickcheck::{
     Arbitrary,
     Gen,

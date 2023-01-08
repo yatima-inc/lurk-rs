@@ -295,7 +295,7 @@ pub fn parse_syn<F: LurkField>(
 #[cfg(test)]
 pub mod tests {
   use blstrs::Scalar as Fr;
-  use lurk_ff::field::test_utils::FWrap;
+  use lurk_ff::field::FWrap;
   use nom::Parser;
 
   use super::*;
