@@ -10,21 +10,18 @@ use std::{
   },
 };
 
-use serde::{
-  Deserialize,
-  Serialize,
-};
+// use serde::{
+//  Deserialize,
+//  Serialize,
+//};
+use lurk_ff::LurkField;
 
-use crate::{
-  field::{
-    FWrap,
-    LurkField,
-  },
-  uint::UInt,
-};
+use crate::uint::UInt;
 
 /// Finite field element type for Lurk. Has different internal representations
-/// to optimize evaluation.
+/// to optimize evaluation. The distinction between `Num` and `uint::UInt` is
+/// that while `Num` might internally sometimes be a u64, a `UInt::U64` is
+/// guaranteed to always be a `u64`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Num<F: LurkField> {
   Scalar(F),
@@ -248,23 +245,22 @@ impl<F: LurkField> From<UInt> for Num<F> {
   }
 }
 
-impl<F: LurkField> Serialize for Num<F> {
-  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-  where S: serde::Serializer {
-    match self {
-      Num::Scalar(f) => FWrap::serialize(&FWrap(*f), serializer),
-      Num::U64(x) => FWrap::serialize(&FWrap(F::from(*x)), serializer),
-    }
-  }
-}
-
-impl<'de, F: LurkField> Deserialize<'de> for Num<F> {
-  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-  where D: serde::Deserializer<'de> {
-    let f = FWrap::deserialize(deserializer)?;
-    Ok(Num::Scalar(f.0))
-  }
-}
+// impl<F: LurkField> Serialize for Num<F> {
+//  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//  where S: serde::Serializer {
+//    match self {
+//      Num::Scalar(f) => FWrap::serialize(&FWrap(*f), serializer),
+//      Num::U64(x) => FWrap::serialize(&FWrap(F::from(*x)), serializer),
+//    }
+//  }
+//}
+// impl<'de, F: LurkField> Deserialize<'de> for Num<F> {
+//  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//  where D: serde::Deserializer<'de> {
+//    let f = FWrap::deserialize(deserializer)?;
+//    Ok(Num::Scalar(f.0))
+//  }
+//}
 
 #[cfg(test)]
 mod tests {

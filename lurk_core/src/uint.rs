@@ -9,15 +9,8 @@ use std::{
   },
 };
 
-use serde::{
-  Deserialize,
-  Serialize,
-};
-
 /// Unsigned fixed-width integer type for Lurk.
-#[derive(
-  Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Hash)]
 pub enum UInt {
   U64(u64),
 }

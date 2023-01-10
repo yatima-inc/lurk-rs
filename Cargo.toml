@@ -4,7 +4,7 @@ version = "0.1.1"
 authors = ["porcuquine <porcuquine@gmail.com>"]
 license = "MIT OR Apache-2.0"
 description = "Turing-Complete Zero Knowledge"
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/lurk-lang/lurk-rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -62,7 +62,7 @@ harness = false
 
 [workspace]
 members = [
-  "lurk_macro", "fcomm", "lurk_ff", "ldon"
+  "lurk_macro", "fcomm", "lurk_ff", "ldon", "lurk_core", "lurk_lang"
 ]
 
 [[bin]]

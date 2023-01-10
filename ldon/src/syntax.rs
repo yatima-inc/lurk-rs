@@ -1,7 +1,4 @@
-use std::{
-  collections::BTreeMap,
-  fmt,
-};
+use std::fmt;
 
 use lurk_ff::field::LurkField;
 
@@ -20,8 +17,6 @@ pub enum Syn<F: LurkField> {
   U64(Pos, u64),
   // A hierarchical symbol: foo, foo.bar.baz
   Symbol(Pos, Vec<String>),
-  // A hierarchical keyword: :lambda, :lurk:lambda
-  Keyword(Pos, Vec<String>),
   // A string literal: "foobar", "foo\nbar"
   String(Pos, String),
   // A character literal: 'a', 'b', '\n'
@@ -47,8 +42,8 @@ impl<F: LurkField> Syn<F> {
     cache: &PoseidonCache<F>,
   ) -> core::cmp::Ordering {
     let mut store = Store::new();
-    let self_ptr = store.intern_syn(cache, self);
-    let other_ptr = store.intern_syn(cache, other);
+    let self_ptr = store.insert_syn(cache, self);
+    let other_ptr = store.insert_syn(cache, other);
     self_ptr.cmp(&other_ptr)
   }
 
@@ -70,7 +65,7 @@ impl<F: LurkField> Syn<F> {
   pub fn escape_symbol(xs: &str) -> String {
     let mut res = String::new();
     for x in xs.chars() {
-      if "(){}[]=,.:".chars().any(|c| c == x) {
+      if "(){}[]=,.".chars().any(|c| c == x) {
         res.push_str(&format!("\\{}", x));
       }
       else if Self::is_whitespace(x) {
@@ -138,13 +133,6 @@ impl<F: LurkField> fmt::Display for Syn<F> {
         }
         Ok(())
       },
-      Self::Keyword(_, xs) if xs.is_empty() => write!(f, "_:"),
-      Self::Keyword(_, xs) => {
-        for x in xs {
-          write!(f, ":{}", Self::escape_symbol(x))?;
-        }
-        Ok(())
-      },
       Self::String(_, x) => write!(f, "\"{}\"", x.escape_default()),
       Self::Char(_, x) => write!(f, "'{}'", x.escape_default()),
       Self::List(_, xs, None) => {
@@ -203,7 +191,6 @@ impl<F: LurkField> PartialEq for Syn<F> {
       (Self::Num(_, x), Self::Num(_, y)) => x == y,
       (Self::U64(_, x), Self::U64(_, y)) => x == y,
       (Self::Symbol(_, x), Self::Symbol(_, y)) => x == y,
-      (Self::Keyword(_, x), Self::Keyword(_, y)) => x == y,
       (Self::String(_, x), Self::String(_, y)) => x == y,
       (Self::Char(_, x), Self::Char(_, y)) => x == y,
       (Self::List(_, x, x1), Self::List(_, y, y1)) => x == y && x1 == y1,
@@ -218,9 +205,11 @@ impl<F: LurkField> Eq for Syn<F> {}
 
 #[cfg(feature = "test-utils")]
 pub mod test_utils {
+  use std::collections::BTreeMap;
+
   use blstrs::Scalar as Fr;
   use lurk_ff::{
-    field::test_utils::FWrap,
+    field::FWrap,
     test_utils::frequency,
   };
   use quickcheck::{
@@ -239,7 +228,6 @@ pub mod test_utils {
         (100, Box::new(|g| Self::Char(Pos::No, char::arbitrary(g)))),
         (100, Box::new(|g| Self::String(Pos::No, Self::arbitrary_string(g)))),
         (50, Box::new(|g| Self::Symbol(Pos::No, Self::arbitrary_symbol(g)))),
-        (50, Box::new(|g| Self::Keyword(Pos::No, Self::arbitrary_symbol(g)))),
         (50, Box::new(Self::arbitrary_list)),
         (50, Box::new(Self::arbitrary_map)),
         (50, Box::new(Self::arbitrary_link)),
@@ -336,7 +324,6 @@ mod test {
   #[allow(unused_imports)]
   use crate::{
     char,
-    key,
     list,
     map,
     num,
@@ -360,21 +347,13 @@ mod test {
   fn unit_syn_print() {
     assert!(test_print(sym!([]), "_."));
     assert!(test_print(sym!(Fr, []), "_."));
-    assert!(test_print(key!([]), "_:"));
-    assert!(test_print(key!(Fr, []), "_:"));
     assert!(test_print(sym!([""]), "."));
-    assert!(test_print(key!([""]), ":"));
     assert!(test_print(sym!(["foo"]), "foo"));
     assert!(test_print(sym!(["fλoo"]), "fλoo"));
     assert!(test_print(sym!(["foo", ""]), "foo."));
     assert!(test_print(sym!(["foo", "", ""]), "foo.."));
     assert!(test_print(sym!(["", "foo"]), "..foo"));
     assert!(test_print(sym!(["", "", "foo"]), "...foo"));
-    assert!(test_print(key!(["foo"]), ":foo"));
-    assert!(test_print(key!(["foo", ""]), ":foo:"));
-    assert!(test_print(key!(["foo", "", ""]), ":foo::"));
-    assert!(test_print(key!(["", "foo"]), "::foo"));
-    assert!(test_print(key!(["", "", "foo"]), ":::foo"));
     assert!(test_print(list!([]), "()"));
     assert!(test_print(list!(Fr, []), "()"));
     assert!(test_print(list!([u64!(1), u64!(2), u64!(3)]), "(1u64 2u64 3u64)"));
@@ -397,7 +376,7 @@ mod test {
     // println!("-------------");
     let mut store1 = Store::<Fr>::default();
     let cache = PoseidonCache::default();
-    let _ptr1 = store1.intern_syn(&cache, &syn);
+    let _ptr1 = store1.insert_syn(&cache, &syn);
     true
   }
 }

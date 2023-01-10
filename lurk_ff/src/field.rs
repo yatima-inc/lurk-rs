@@ -1,16 +1,14 @@
+use std::hash::Hash;
+
 use ff::{
   PrimeField,
   PrimeFieldBits,
 };
 
 use crate::tag::{
-  ContTag,
   ExprTag,
-  FieldKind,
-  Op1,
-  Op2,
+  FieldTag,
   Tag,
-  TagKind,
   Version,
 };
 
@@ -18,7 +16,7 @@ const CURRENT_VERSION: Version = Version { major: 0, minor: 0, patch: 0 };
 
 pub trait LurkField: PrimeField + PrimeFieldBits {
   const VERSION: Version;
-  const FIELD_KIND: FieldKind;
+  const FIELD_KIND: FieldTag;
 
   fn from_repr_bytes(bs: &[u8]) -> Option<Self> {
     let mut def: Self::Repr = Self::default().to_repr();
@@ -28,7 +26,7 @@ pub trait LurkField: PrimeField + PrimeFieldBits {
 
   // Construct bytes from a field element *ignoring* the trait specific
   // implementation of Repr
-  fn to_le_bytes_noncanonical(self) -> Vec<u8> {
+  fn to_le_bytes_canonical(self) -> Vec<u8> {
     let mut vec = vec![];
     let bits = self.to_le_bits();
 
@@ -48,15 +46,15 @@ pub trait LurkField: PrimeField + PrimeFieldBits {
 
   fn hex_digits(self) -> String {
     let mut s = String::new();
-    let bytes = self.to_le_bytes_noncanonical();
+    let bytes = self.to_le_bytes_canonical();
     for b in bytes.iter().rev() {
       s.push_str(&format!("{:02x?}", b));
     }
     s
   }
 
-  // Construct field element from possibly noncanonical bytes
-  fn from_le_bytes_noncanonical(bs: &[u8]) -> Self {
+  // Construct field element from possibly canonical bytes
+  fn from_le_bytes_canonical(bs: &[u8]) -> Self {
     let mut res = Self::zero();
     let mut bs = bs.iter().rev().peekable();
     while let Some(b) = bs.next() {
@@ -144,10 +142,8 @@ pub trait LurkField: PrimeField + PrimeFieldBits {
   }
 
   fn from_u64(x: u64) -> Self { x.into() }
-
   fn from_u32(x: u32) -> Self { (x as u64).into() }
-  fn from_u16(x: u32) -> Self { (x as u64).into() }
-
+  fn from_u16(x: u16) -> Self { (x as u64).into() }
   fn from_char(x: char) -> Self { Self::from_u32(x as u32) }
 
   fn most_negative() -> Self { Self::most_positive() + Self::one() }
@@ -180,40 +176,8 @@ pub trait LurkField: PrimeField + PrimeFieldBits {
     }
   }
 
-  fn make_tag(kind: TagKind) -> Tag {
-    Tag { version: Self::VERSION, field: Self::FIELD_KIND, kind }
-  }
-
-  fn make_expr_tag(expr_tag: ExprTag) -> Tag {
-    Tag {
-      version: Self::VERSION,
-      field: Self::FIELD_KIND,
-      kind: TagKind::Expr(expr_tag),
-    }
-  }
-
-  fn make_cont_tag(cont_tag: ContTag) -> Tag {
-    Tag {
-      version: Self::VERSION,
-      field: Self::FIELD_KIND,
-      kind: TagKind::Cont(cont_tag),
-    }
-  }
-
-  fn make_op1_tag(op1_tag: Op1) -> Tag {
-    Tag {
-      version: Self::VERSION,
-      field: Self::FIELD_KIND,
-      kind: TagKind::Op1(op1_tag),
-    }
-  }
-
-  fn make_op2_tag(kind: Op2) -> Tag {
-    Tag {
-      version: Self::VERSION,
-      field: Self::FIELD_KIND,
-      kind: TagKind::Op2(kind),
-    }
+  fn expr_tag(expr_tag: ExprTag) -> Tag {
+    Tag { version: Self::VERSION, field: Self::FIELD_KIND, expr: expr_tag }
   }
 
   fn to_tag(&self) -> Option<Tag> {
@@ -223,26 +187,37 @@ pub trait LurkField: PrimeField + PrimeFieldBits {
 
   fn get_version(&self) -> Option<Version> { Some(Self::to_tag(self)?.version) }
 
-  fn get_tag_kind(&self) -> Option<TagKind> { Some(Self::to_tag(self)?.kind) }
+  fn get_expr_tag(&self) -> Option<ExprTag> { Some(Self::to_tag(self)?.expr) }
 
-  fn get_field_kind(&self) -> Option<FieldKind> {
+  fn get_field_tag(&self) -> Option<FieldTag> {
     Some(Self::to_tag(self)?.field)
   }
 }
 
 impl LurkField for blstrs::Scalar {
-  const FIELD_KIND: FieldKind = FieldKind::BLS12_381;
+  const FIELD_KIND: FieldTag = FieldTag::BLS12_381;
   const VERSION: Version = CURRENT_VERSION;
 }
 
 impl LurkField for pasta_curves::Fp {
-  const FIELD_KIND: FieldKind = FieldKind::Pallas;
+  const FIELD_KIND: FieldTag = FieldTag::Pallas;
   const VERSION: Version = CURRENT_VERSION;
 }
 
 impl LurkField for pasta_curves::Fq {
-  const FIELD_KIND: FieldKind = FieldKind::Vesta;
+  const FIELD_KIND: FieldTag = FieldTag::Vesta;
   const VERSION: Version = CURRENT_VERSION;
+}
+
+// For working around the orphan trait impl rule
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FWrap<F: LurkField>(pub F);
+
+#[allow(clippy::derive_hash_xor_eq)]
+impl<F: LurkField> Hash for FWrap<F> {
+  fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    self.0.to_repr().as_ref().hash(state);
+  }
 }
 
 #[cfg(feature = "test-utils")]
@@ -253,10 +228,6 @@ pub mod test_utils {
   };
 
   use super::*;
-
-  // For working around the orphan trait impl rule
-  #[derive(Clone, Debug, PartialEq, Eq)]
-  pub struct FWrap<F: LurkField>(pub F);
 
   impl<F: LurkField> Arbitrary for FWrap<F> {
     fn arbitrary(_: &mut Gen) -> Self {
@@ -295,8 +266,8 @@ pub mod tests {
 
   #[quickcheck]
   fn prop_byte_digits_consistency(f1: FWrap<Fr>) -> bool {
-    let bytes = f1.0.to_le_bytes_noncanonical();
-    let f2 = Fr::from_le_bytes_noncanonical(&bytes);
+    let bytes = f1.0.to_le_bytes_canonical();
+    let f2 = Fr::from_le_bytes_canonical(&bytes);
     println!("{:?}", bytes);
     println!("f1 0x{}", f1.0.hex_digits());
     println!("f2 0x{}", f2.hex_digits());

@@ -79,9 +79,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.60"
+version = "0.1.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "677d1d8ab452a3936018a687b20e6f7cf5363d713b732b8884001317b0e48aa3"
+checksum = "705339e0e4a9690e2908d2b3d049d85682cf19fbd5782494498fbf7003a6a282"
 dependencies = [
  "proc-macro2 1.0.49",
  "quote 1.0.23",
@@ -1085,9 +1085,9 @@ dependencies = [
 
 [[package]]
 name = "glob"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
+checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
 
 [[package]]
 name = "group"
@@ -1441,6 +1441,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lurk_core"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "dashmap",
+ "indexmap",
+ "ldon",
+ "lurk_core",
+ "lurk_ff",
+ "once_cell",
+ "quickcheck",
+ "quickcheck_macros",
+ "rand 0.8.5",
+ "rayon",
+ "string-interner",
+]
+
+[[package]]
 name = "lurk_ff"
 version = "0.1.0"
 dependencies = [
@@ -1452,6 +1470,10 @@ dependencies = [
  "quickcheck_macros",
  "rand 0.8.5",
 ]
+
+[[package]]
+name = "lurk_lang"
+version = "0.1.0"
 
 [[package]]
 name = "lurk_macro"
