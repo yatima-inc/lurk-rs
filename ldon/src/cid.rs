@@ -27,20 +27,20 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Ptr<F: LurkField> {
+pub struct Cid<F: LurkField> {
   pub tag: Tag,
   pub val: F,
 }
 
 #[allow(clippy::derive_hash_xor_eq)]
-impl<F: LurkField> Hash for Ptr<F> {
+impl<F: LurkField> Hash for Cid<F> {
   fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
     self.tag.hash(state);
     FWrap(self.val).hash(state);
   }
 }
 
-impl<F: LurkField> Ptr<F> {
+impl<F: LurkField> Cid<F> {
   pub fn immediate(self) -> Option<Expr<F>> {
     match self.tag.expr {
       ExprTag::Num => Some(Expr::Num(self.val)),
@@ -61,7 +61,7 @@ impl<F: LurkField> Ptr<F> {
 
   pub fn is_immediate(self) -> bool { self.immediate().is_some() }
 
-  pub fn child_ptr_arity(self) -> usize {
+  pub fn child_cid_arity(self) -> usize {
     if self.immediate().is_some() {
       0
     }
@@ -92,7 +92,7 @@ impl<F: LurkField> Ptr<F> {
   }
 }
 
-impl<F: LurkField> PartialOrd for Ptr<F> {
+impl<F: LurkField> PartialOrd for Cid<F> {
   fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
     (
       F::from_tag_unchecked(self.tag).to_repr().as_ref(),
@@ -105,7 +105,7 @@ impl<F: LurkField> PartialOrd for Ptr<F> {
   }
 }
 
-impl<F: LurkField> Ord for Ptr<F> {
+impl<F: LurkField> Ord for Cid<F> {
   fn cmp(&self, other: &Self) -> core::cmp::Ordering {
     (
       F::from_tag_unchecked(self.tag).to_repr().as_ref(),
@@ -118,23 +118,23 @@ impl<F: LurkField> Ord for Ptr<F> {
   }
 }
 
-impl<F: LurkField> fmt::Display for Ptr<F> {
+impl<F: LurkField> fmt::Display for Cid<F> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.tag.expr)?;
     write!(f, "{}", self.val.hex_digits())
   }
 }
 
-impl<F: LurkField> SerdeF<F> for Ptr<F> {
+impl<F: LurkField> SerdeF<F> for Cid<F> {
   fn ser_f(&self) -> Vec<F> { vec![F::from_tag_unchecked(self.tag), self.val] }
 
-  fn de_f(fs: &[F]) -> Result<Ptr<F>, SerdeFError<F>> {
+  fn de_f(fs: &[F]) -> Result<Cid<F>, SerdeFError<F>> {
     match fs {
       &[tag, val, ..] => {
         let tag = F::to_tag(&tag).ok_or(SerdeFError::UnknownTag(tag))?;
-        Ok(Ptr { tag, val })
+        Ok(Cid { tag, val })
       },
-      _ => Err(SerdeFError::Expected("Ptr".to_string())),
+      _ => Err(SerdeFError::Expected("Cid".to_string())),
     }
   }
 }
@@ -149,9 +149,9 @@ pub mod test_utils {
   };
 
   use super::*;
-  impl Arbitrary for Ptr<Fr> {
+  impl Arbitrary for Cid<Fr> {
     fn arbitrary(g: &mut Gen) -> Self {
-      Ptr { tag: Arbitrary::arbitrary(g), val: FWrap::arbitrary(g).0 }
+      Cid { tag: Arbitrary::arbitrary(g), val: FWrap::arbitrary(g).0 }
     }
   }
 }
@@ -163,8 +163,8 @@ pub mod tests {
   use super::*;
 
   #[quickcheck]
-  fn prop_ptr_serdef(ptr: Ptr<Fr>) -> bool {
-    match Ptr::de_f(&ptr.ser_f()) {
+  fn prop_ptr_serdef(ptr: Cid<Fr>) -> bool {
+    match Cid::de_f(&ptr.ser_f()) {
       Ok(ptr2) => ptr == ptr2,
       Err(e) => {
         println!("{:?}", e);
@@ -174,8 +174,8 @@ pub mod tests {
   }
 
   #[quickcheck]
-  fn prop_ptr_serde(ptr: Ptr<Fr>) -> bool {
-    match Ptr::de(&ptr.ser()) {
+  fn prop_ptr_serde(ptr: Cid<Fr>) -> bool {
+    match Cid::de(&ptr.ser()) {
       Ok(ptr2) => ptr == ptr2,
       Err(e) => {
         println!("{:?}", e);

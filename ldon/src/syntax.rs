@@ -42,8 +42,8 @@ impl<F: LurkField> Syn<F> {
     cache: &PoseidonCache<F>,
   ) -> core::cmp::Ordering {
     let mut store = Store::new();
-    let self_ptr = store.intern_syn(cache, self);
-    let other_ptr = store.intern_syn(cache, other);
+    let self_ptr = store.insert_syn(cache, self);
+    let other_ptr = store.insert_syn(cache, other);
     self_ptr.cmp(&other_ptr)
   }
 
@@ -376,7 +376,7 @@ mod test {
     // println!("-------------");
     let mut store1 = Store::<Fr>::default();
     let cache = PoseidonCache::default();
-    let _ptr1 = store1.intern_syn(&cache, &syn);
+    let _ptr1 = store1.insert_syn(&cache, &syn);
     true
   }
 }

@@ -9,10 +9,10 @@ use lurk_ff::{
 };
 
 use crate::{
+  cid::Cid,
   expr::Expr,
   hash::PoseidonCache,
   parser::position::Pos,
-  ptr::Ptr,
   serde_f::{
     SerdeF,
     SerdeFError,
@@ -21,7 +21,7 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Store<F: LurkField>(BTreeMap<Ptr<F>, Entry<F>>);
+pub struct Store<F: LurkField>(BTreeMap<Cid<F>, Entry<F>>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<F: LurkField> {
@@ -31,95 +31,95 @@ pub enum Entry<F: LurkField> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError<F: LurkField> {
-  UnknownPtr(Ptr<F>),
-  UnexpectedEntry(Ptr<F>, Entry<F>, &'static str),
-  ExpectedChar(Ptr<F>),
-  ExpectedU64(Ptr<F>),
-  ExpectedString(Ptr<F>),
-  ExpectedSymbol(Ptr<F>),
-  ExpectedMap(Ptr<F>),
-  ExpectedLink(Ptr<F>),
+  UnknownCid(Cid<F>),
+  UnexpectedEntry(Cid<F>, Entry<F>, &'static str),
+  ExpectedChar(Cid<F>),
+  ExpectedU64(Cid<F>),
+  ExpectedString(Cid<F>),
+  ExpectedSymbol(Cid<F>),
+  ExpectedMap(Cid<F>),
+  ExpectedLink(Cid<F>),
   Custom(&'static str),
 }
 
 impl<F: LurkField> Store<F> {
   pub fn new() -> Self { Self::default() }
 
-  pub fn intern_expr(
+  pub fn insert_expr(
     &mut self,
     cache: &PoseidonCache<F>,
     expr: Expr<F>,
-  ) -> Ptr<F> {
-    let ptr = expr.ptr(cache);
-    if ptr.immediate().is_none() {
-      self.0.insert(ptr, Entry::Expr(expr));
+  ) -> Cid<F> {
+    let cid = expr.cid(cache);
+    if cid.immediate().is_none() {
+      self.0.insert(cid, Entry::Expr(expr));
     }
-    ptr
+    cid
   }
 
-  pub fn intern_syn(
+  pub fn insert_syn(
     &mut self,
     cache: &PoseidonCache<F>,
     syn: &Syn<F>,
-  ) -> Ptr<F> {
+  ) -> Cid<F> {
     match syn {
-      Syn::Num(_, f) => self.intern_expr(cache, Expr::Num(*f)),
-      Syn::Char(_, c) => self.intern_expr(cache, Expr::Char(F::from_char(*c))),
-      Syn::U64(_, x) => self.intern_expr(cache, Expr::U64((*x).into())),
+      Syn::Num(_, f) => self.insert_expr(cache, Expr::Num(*f)),
+      Syn::Char(_, c) => self.insert_expr(cache, Expr::Char(F::from_char(*c))),
+      Syn::U64(_, x) => self.insert_expr(cache, Expr::U64((*x).into())),
       Syn::String(_, string) => {
-        let mut ptr = self.intern_expr(cache, Expr::StrNil);
+        let mut cid = self.insert_expr(cache, Expr::StrNil);
         for c in string.chars().rev() {
-          let char_ptr =
-            Ptr { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
-          ptr = self.intern_expr(cache, Expr::StrCons(char_ptr, ptr));
+          let char_cid =
+            Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
+          cid = self.insert_expr(cache, Expr::StrCons(char_cid, cid));
         }
-        ptr
+        cid
       },
       Syn::Symbol(_, sym) => {
-        let mut ptr = self.intern_expr(cache, Expr::SymNil);
+        let mut cid = self.insert_expr(cache, Expr::SymNil);
         for s in sym {
-          let str_ptr =
-            self.intern_syn(cache, &Syn::String(Pos::No, s.clone()));
-          ptr = self.intern_expr(cache, Expr::SymCons(str_ptr, ptr));
+          let str_cid =
+            self.insert_syn(cache, &Syn::String(Pos::No, s.clone()));
+          cid = self.insert_expr(cache, Expr::SymCons(str_cid, cid));
         }
-        ptr
+        cid
       },
       Syn::List(_, xs, end) => {
         if let (Some(end), true) = (end, xs.is_empty()) {
-          let nil_ptr = self.intern_expr(cache, Expr::ConsNil);
-          let end_ptr = self.intern_syn(cache, end);
-          return self.intern_expr(cache, Expr::Cons(end_ptr, nil_ptr));
+          let nil_cid = self.insert_expr(cache, Expr::ConsNil);
+          let end_cid = self.insert_syn(cache, end);
+          return self.insert_expr(cache, Expr::Cons(end_cid, nil_cid));
         }
-        let mut ptr = match end {
-          Some(end) => self.intern_syn(cache, end),
-          None => self.intern_expr(cache, Expr::ConsNil),
+        let mut cid = match end {
+          Some(end) => self.insert_syn(cache, end),
+          None => self.insert_expr(cache, Expr::ConsNil),
         };
         for x in xs.iter().rev() {
-          let head_ptr = self.intern_syn(cache, x);
-          ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
+          let head_cid = self.insert_syn(cache, x);
+          cid = self.insert_expr(cache, Expr::Cons(head_cid, cid));
         }
-        ptr
+        cid
       },
       Syn::Map(_, map) => {
-        // We need to sort the entries by Ptr value first
-        let mut sorted: BTreeMap<Ptr<F>, Ptr<F>> = BTreeMap::new();
+        // We need to sort the entries by Cid value first
+        let mut sorted: BTreeMap<Cid<F>, Cid<F>> = BTreeMap::new();
         for (k, v) in map {
-          let key_ptr = self.intern_syn(cache, k);
-          let val_ptr = self.intern_syn(cache, v);
-          sorted.insert(key_ptr, val_ptr);
+          let key_cid = self.insert_syn(cache, k);
+          let val_cid = self.insert_syn(cache, v);
+          sorted.insert(key_cid, val_cid);
         }
         // Then construct the cons-list of pairs
-        let mut ptr = self.intern_expr(cache, Expr::ConsNil);
-        for (key_ptr, val_ptr) in sorted.iter().rev() {
-          let head_ptr =
-            self.intern_expr(cache, Expr::Cons(*key_ptr, *val_ptr));
-          ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
+        let mut cid = self.insert_expr(cache, Expr::ConsNil);
+        for (key_cid, val_cid) in sorted.iter().rev() {
+          let head_cid =
+            self.insert_expr(cache, Expr::Cons(*key_cid, *val_cid));
+          cid = self.insert_expr(cache, Expr::Cons(head_cid, cid));
         }
-        self.intern_expr(cache, Expr::Map(ptr))
+        self.insert_expr(cache, Expr::Map(cid))
       },
       Syn::Link(_, ctx, val) => {
-        let ctx_ptr = self.intern_syn(cache, ctx);
-        let val_ptr = self.intern_syn(
+        let ctx_cid = self.insert_syn(cache, ctx);
+        let val_cid = self.insert_syn(
           cache,
           &Syn::List(
             Pos::No,
@@ -127,99 +127,99 @@ impl<F: LurkField> Store<F> {
             None,
           ),
         );
-        self.intern_expr(cache, Expr::Link(ctx_ptr, val_ptr))
+        self.insert_expr(cache, Expr::Link(ctx_cid, val_cid))
       },
     }
   }
 
-  pub fn get_entry(&self, ptr: Ptr<F>) -> Result<Entry<F>, StoreError<F>> {
-    if let Some(expr) = ptr.immediate() {
+  pub fn get_entry(&self, cid: Cid<F>) -> Result<Entry<F>, StoreError<F>> {
+    if let Some(expr) = cid.immediate() {
       Ok(Entry::Expr(expr))
     }
     else {
-      let entry = self.0.get(&ptr).ok_or(StoreError::UnknownPtr(ptr))?;
+      let entry = self.0.get(&cid).ok_or(StoreError::UnknownCid(cid))?;
       Ok(entry.clone())
     }
   }
 
-  pub fn get_expr(&self, ptr: Ptr<F>) -> Result<Expr<F>, StoreError<F>> {
-    match self.get_entry(ptr)? {
+  pub fn get_expr(&self, cid: Cid<F>) -> Result<Expr<F>, StoreError<F>> {
+    match self.get_entry(cid)? {
       Entry::Expr(x) => Ok(x),
       Entry::Opaque => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Opaque, "Expr"))
+        Err(StoreError::UnexpectedEntry(cid, Entry::Opaque, "Expr"))
       },
     }
   }
 
-  pub fn get_opaque(&self, ptr: Ptr<F>) -> Result<(), StoreError<F>> {
-    match self.get_entry(ptr)? {
+  pub fn get_opaque(&self, cid: Cid<F>) -> Result<(), StoreError<F>> {
+    match self.get_entry(cid)? {
       Entry::Expr(x) => {
-        Err(StoreError::UnexpectedEntry(ptr, Entry::Expr(x), "Opaque"))
+        Err(StoreError::UnexpectedEntry(cid, Entry::Expr(x), "Opaque"))
       },
       Entry::Opaque => Ok(()),
     }
   }
 
-  pub fn get_syn_list(&self, ptr: Ptr<F>) -> Result<Syn<F>, StoreError<F>> {
+  pub fn get_syn_list(&self, cid: Cid<F>) -> Result<Syn<F>, StoreError<F>> {
     let mut list = vec![];
-    let mut ptr = ptr;
+    let mut cid = cid;
 
-    while let Expr::Cons(car, cdr) = self.get_expr(ptr)? {
+    while let Expr::Cons(car, cdr) = self.get_expr(cid)? {
       list.push(self.get_syn(car)?);
-      ptr = cdr;
+      cid = cdr;
     }
-    if let Expr::ConsNil = self.get_expr(ptr)? {
+    if let Expr::ConsNil = self.get_expr(cid)? {
       Ok(Syn::List(Pos::No, list, None))
     }
     else {
-      Ok(Syn::List(Pos::No, list, Some(Box::new(self.get_syn(ptr)?))))
+      Ok(Syn::List(Pos::No, list, Some(Box::new(self.get_syn(cid)?))))
     }
   }
 
   pub fn get_syn_link(
     &self,
-    ctx: Ptr<F>,
-    data: Ptr<F>,
+    ctx: Cid<F>,
+    data: Cid<F>,
   ) -> Result<Syn<F>, StoreError<F>> {
     let mut list = vec![];
     let ctx = self.get_syn(ctx)?;
-    let mut ptr = data;
+    let mut cid = data;
 
-    while let Expr::Cons(car, cdr) = self.get_expr(ptr)? {
+    while let Expr::Cons(car, cdr) = self.get_expr(cid)? {
       list.push(self.get_u64(car)?);
-      ptr = cdr;
+      cid = cdr;
     }
-    if let Expr::ConsNil = self.get_expr(ptr)? {
+    if let Expr::ConsNil = self.get_expr(cid)? {
       Ok(Syn::Link(Pos::No, Box::new(ctx), list))
     }
     else {
-      Err(StoreError::ExpectedLink(ptr))
+      Err(StoreError::ExpectedLink(cid))
     }
   }
 
-  pub fn get_u64(&self, ptr: Ptr<F>) -> Result<u64, StoreError<F>> {
-    if let Expr::U64(f) = self.get_expr(ptr)? {
-      let x = F::to_u64(&f).ok_or(StoreError::ExpectedU64(ptr))?;
+  pub fn get_u64(&self, cid: Cid<F>) -> Result<u64, StoreError<F>> {
+    if let Expr::U64(f) = self.get_expr(cid)? {
+      let x = F::to_u64(&f).ok_or(StoreError::ExpectedU64(cid))?;
       Ok(x)
     }
     else {
-      Err(StoreError::ExpectedU64(ptr))
+      Err(StoreError::ExpectedU64(cid))
     }
   }
 
-  pub fn get_char(&self, ptr: Ptr<F>) -> Result<char, StoreError<F>> {
-    if let Expr::Char(f) = self.get_expr(ptr)? {
-      let c = F::to_char(&f).ok_or(StoreError::ExpectedChar(ptr))?;
+  pub fn get_char(&self, cid: Cid<F>) -> Result<char, StoreError<F>> {
+    if let Expr::Char(f) = self.get_expr(cid)? {
+      let c = F::to_char(&f).ok_or(StoreError::ExpectedChar(cid))?;
       Ok(c)
     }
     else {
-      Err(StoreError::ExpectedChar(ptr))
+      Err(StoreError::ExpectedChar(cid))
     }
   }
 
-  pub fn get_string(&self, ptr: Ptr<F>) -> Result<String, StoreError<F>> {
+  pub fn get_string(&self, cid: Cid<F>) -> Result<String, StoreError<F>> {
     let mut s = String::new();
-    let mut next = ptr;
+    let mut next = cid;
 
     while let Expr::StrCons(car, cdr) = self.get_expr(next)? {
       s.push(self.get_char(car)?);
@@ -229,13 +229,13 @@ impl<F: LurkField> Store<F> {
       Ok(s)
     }
     else {
-      Err(StoreError::ExpectedString(ptr))
+      Err(StoreError::ExpectedString(cid))
     }
   }
 
-  pub fn get_symbol(&self, ptr: Ptr<F>) -> Result<Vec<String>, StoreError<F>> {
+  pub fn get_symbol(&self, cid: Cid<F>) -> Result<Vec<String>, StoreError<F>> {
     let mut list = vec![];
-    let mut next = ptr;
+    let mut next = cid;
 
     while let Expr::SymCons(car, cdr) = self.get_expr(next)? {
       list.push(self.get_string(car)?);
@@ -245,13 +245,13 @@ impl<F: LurkField> Store<F> {
       Ok(list.into_iter().rev().collect())
     }
     else {
-      Err(StoreError::ExpectedSymbol(ptr))
+      Err(StoreError::ExpectedSymbol(cid))
     }
   }
 
-  pub fn get_syn_map(&self, ptr: Ptr<F>) -> Result<Syn<F>, StoreError<F>> {
+  pub fn get_syn_map(&self, cid: Cid<F>) -> Result<Syn<F>, StoreError<F>> {
     let mut assoc = vec![];
-    let mut next = ptr;
+    let mut next = cid;
 
     while let Expr::Cons(entry, cdr) = self.get_expr(next)? {
       if let Expr::Cons(key, val) = self.get_expr(entry)? {
@@ -259,31 +259,31 @@ impl<F: LurkField> Store<F> {
         next = cdr;
       }
       else {
-        return Err(StoreError::ExpectedMap(ptr));
+        return Err(StoreError::ExpectedMap(cid));
       }
     }
     // could test for correctness here
     Ok(Syn::Map(Pos::No, assoc))
   }
 
-  pub fn get_syn(&self, ptr: Ptr<F>) -> Result<Syn<F>, StoreError<F>> {
-    let expr = self.get_expr(ptr)?;
+  pub fn get_syn(&self, cid: Cid<F>) -> Result<Syn<F>, StoreError<F>> {
+    let expr = self.get_expr(cid)?;
     match expr {
       Expr::ConsNil => Ok(Syn::List(Pos::No, vec![], None)),
       Expr::SymNil => Ok(Syn::Symbol(Pos::No, vec![])),
       Expr::StrNil => Ok(Syn::String(Pos::No, "".to_string())),
       Expr::Num(f) => Ok(Syn::Num(Pos::No, f)),
-      Expr::Char(_) => Ok(Syn::Char(Pos::No, self.get_char(ptr)?)),
-      Expr::U64(_) => Ok(Syn::U64(Pos::No, self.get_u64(ptr)?)),
-      Expr::Cons(..) => self.get_syn_list(ptr),
-      Expr::StrCons(..) => Ok(Syn::String(Pos::No, self.get_string(ptr)?)),
-      Expr::SymCons(..) => Ok(Syn::Symbol(Pos::No, self.get_symbol(ptr)?)),
+      Expr::Char(_) => Ok(Syn::Char(Pos::No, self.get_char(cid)?)),
+      Expr::U64(_) => Ok(Syn::U64(Pos::No, self.get_u64(cid)?)),
+      Expr::Cons(..) => self.get_syn_list(cid),
+      Expr::StrCons(..) => Ok(Syn::String(Pos::No, self.get_string(cid)?)),
+      Expr::SymCons(..) => Ok(Syn::Symbol(Pos::No, self.get_symbol(cid)?)),
       Expr::Map(map) => self.get_syn_map(map),
       Expr::Link(ctx, data) => self.get_syn_link(ctx, data),
       _ => Err(StoreError::Custom("no syntax for Comm, Thunk, Fun")),
-      // Expr::Comm(F, Ptr<F>),             // secret, val
-      // Expr::Thunk(Ptr<F>, Ptr<F>),       // val, cont
-      // Expr::Fun(Ptr<F>, Ptr<F>, Ptr<F>), // arg, body, env
+      // Expr::Comm(F, Cid<F>),             // secret, val
+      // Expr::Thunk(Cid<F>, Cid<F>),       // val, cont
+      // Expr::Fun(Cid<F>, Cid<F>, Cid<F>), // arg, body, env
     }
   }
 }
@@ -310,10 +310,10 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
   fn ser_f(&self) -> Vec<F> {
     let mut exprs = Vec::new();
     let mut opaqs = Vec::new();
-    for (ptr, entry) in self.0.iter() {
+    for (cid, entry) in self.0.iter() {
       match entry {
         Entry::Expr(x) => exprs.extend(x.ser_f().into_iter()),
-        Entry::Opaque => opaqs.extend(ptr.ser_f()),
+        Entry::Opaque => opaqs.extend(cid.ser_f()),
       }
     }
     let mut res = vec![(opaqs.len() as u64).into()];
@@ -323,7 +323,7 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
   }
 
   fn de_f(fs: &[F]) -> Result<Store<F>, SerdeFError<F>> {
-    let mut map: BTreeMap<Ptr<F>, Entry<F>> = BTreeMap::new();
+    let mut map: BTreeMap<Cid<F>, Entry<F>> = BTreeMap::new();
     if fs.is_empty() {
       return Err(SerdeFError::UnexpectedEnd);
     }
@@ -338,14 +338,14 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
     }
     let mut i = 1;
     while i <= opaqs {
-      map.insert(Ptr::de_f(&fs[i..])?, Entry::Opaque);
+      map.insert(Cid::de_f(&fs[i..])?, Entry::Opaque);
       i += 2;
     }
     while i < fs.len() {
-      let ptr = Ptr::de_f(&fs[i..])?;
+      let cid = Cid::de_f(&fs[i..])?;
       let expr = Expr::de_f(&fs[i..])?;
-      map.insert(ptr, Entry::Expr(expr));
-      i += 2 + expr.child_ptrs().len() * 2;
+      map.insert(cid, Entry::Expr(expr));
+      i += 2 + expr.child_cids().len() * 2;
     }
     Ok(Store(map))
   }
@@ -373,14 +373,14 @@ pub mod test_utils {
 
   impl Arbitrary for Store<Fr> {
     fn arbitrary(g: &mut Gen) -> Self {
-      let mut map: BTreeMap<Ptr<Fr>, Entry<Fr>> = BTreeMap::new();
+      let mut map: BTreeMap<Cid<Fr>, Entry<Fr>> = BTreeMap::new();
       let n: usize = usize::arbitrary(g) % 5;
       let cache = PoseidonCache::default();
       for _ in 0..n {
         let entry = Entry::arbitrary(g);
         match entry {
-          Entry::Opaque => map.insert(Ptr::arbitrary(g), entry),
-          Entry::Expr(x) => map.insert(x.ptr(&cache), entry),
+          Entry::Opaque => map.insert(Cid::arbitrary(g), entry),
+          Entry::Expr(x) => map.insert(x.cid(&cache), entry),
         };
       }
       Store(map)
@@ -410,10 +410,10 @@ mod test {
     let cache = PoseidonCache::default();
 
     let mut test = |expr1| {
-      let ptr = store.intern_expr(&cache, expr1);
-      let expr2 = store.get_expr(ptr).unwrap();
+      let cid = store.insert_expr(&cache, expr1);
+      let expr2 = store.get_expr(cid).unwrap();
       assert!(expr1 == expr2);
-      ptr
+      cid
     };
 
     test(Expr::Num(0u64.into()));
@@ -432,18 +432,18 @@ mod test {
     let cache = PoseidonCache::default();
 
     let mut test = |syn1| {
-      let ptr = store.intern_syn(&cache, &syn1);
-      if let Ok(syn2) = store.get_syn(ptr) {
+      let cid = store.insert_syn(&cache, &syn1);
+      if let Ok(syn2) = store.get_syn(cid) {
         println!("{:?}", syn1);
         println!("{:?}", syn2);
         assert!(syn1 == syn2);
-        ptr
+        cid
       }
       else {
-        println!("{:?}", store.get_syn(ptr));
+        println!("{:?}", store.get_syn(cid));
         println!("{}", store);
         assert!(false);
-        ptr
+        cid
       }
     };
 
@@ -475,10 +475,10 @@ mod test {
     let mut store = Store::default();
     let cache = PoseidonCache::default();
 
-    let ptr = store.intern_syn(&cache, &syn);
-    println!("ptr: {}", ptr);
+    let cid = store.insert_syn(&cache, &syn);
+    println!("cid: {}", cid);
     println!("store: {}", store);
-    let syn2 = store.get_syn(ptr).unwrap();
+    let syn2 = store.get_syn(cid).unwrap();
     assert_eq!(syn, syn2);
     let bytes = store.ser();
     println!("bytes: {:?}", bytes);
@@ -491,8 +491,8 @@ mod test {
   fn prop_syn_store_get(syn1: Syn<Fr>) -> bool {
     let mut store1 = Store::<Fr>::default();
     let cache = PoseidonCache::default();
-    let ptr1 = store1.intern_syn(&cache, &syn1);
-    let syn2 = store1.get_syn(ptr1).unwrap();
+    let cid1 = store1.insert_syn(&cache, &syn1);
+    let syn2 = store1.get_syn(cid1).unwrap();
     println!("{:?}", syn1);
     println!("{:?}", syn2);
     syn1 == syn2
@@ -504,7 +504,7 @@ mod test {
     let cache = PoseidonCache::default();
 
     let mut test = |syn1| {
-      let _ptr = store1.intern_syn(&cache, &syn1);
+      let _cid = store1.insert_syn(&cache, &syn1);
       let vec = &store1.ser_f();
       println!("syn: {:?}", syn1);
       println!("store: {}", store1);
@@ -544,7 +544,7 @@ mod test {
     println!("==================");
     let mut store1 = Store::<Fr>::default();
     let cache = PoseidonCache::default();
-    store1.intern_syn(&cache, &syn1);
+    store1.insert_syn(&cache, &syn1);
     let vec = &store1.ser_f();
     match Store::de_f(&vec) {
       Ok(store2) => {
