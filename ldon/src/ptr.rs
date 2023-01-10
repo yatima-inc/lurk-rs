@@ -73,7 +73,6 @@ impl<F: LurkField> Ptr<F> {
         ExprTag::Thunk => 2,
         ExprTag::Str => 2,
         ExprTag::Comm => 2,
-        ExprTag::Key => 1,
         ExprTag::Map => 1,
         ExprTag::Link => 2,
         ExprTag::Call => 3,

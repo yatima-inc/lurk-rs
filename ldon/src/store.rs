@@ -57,102 +57,6 @@ impl<F: LurkField> Store<F> {
     ptr
   }
 
-  pub fn intern_string(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    string: &str,
-  ) -> Ptr<F> {
-    let mut ptr = self.intern_expr(cache, Expr::StrNil);
-
-    for c in string.chars().rev() {
-      let char_ptr =
-        Ptr { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
-      ptr = self.intern_expr(cache, Expr::StrCons(char_ptr, ptr));
-    }
-    ptr
-  }
-
-  pub fn intern_symbol(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    strs: &Vec<String>,
-  ) -> Ptr<F> {
-    let mut ptr = self.intern_expr(cache, Expr::SymNil);
-
-    for s in strs {
-      let str_ptr = self.intern_string(cache, s);
-      ptr = self.intern_expr(cache, Expr::SymCons(str_ptr, ptr));
-    }
-    ptr
-  }
-
-  pub fn intern_keyword(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    strs: &Vec<String>,
-  ) -> Ptr<F> {
-    let sym_ptr = self.intern_symbol(cache, strs);
-    self.intern_expr(cache, Expr::Keyword(sym_ptr))
-  }
-
-  pub fn intern_list(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    xs: &Vec<Syn<F>>,
-    end: &Option<Box<Syn<F>>>,
-  ) -> Ptr<F> {
-    if let (Some(end), true) = (end, xs.is_empty()) {
-      let nil_ptr = self.intern_expr(cache, Expr::ConsNil);
-      let end_ptr = self.intern_syn(cache, end);
-      return self.intern_expr(cache, Expr::Cons(end_ptr, nil_ptr));
-    }
-    let mut ptr = match end {
-      Some(end) => self.intern_syn(cache, end),
-      None => self.intern_expr(cache, Expr::ConsNil),
-    };
-    for x in xs.iter().rev() {
-      let head_ptr = self.intern_syn(cache, x);
-      ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
-    }
-    ptr
-  }
-
-  pub fn intern_map(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    xs: &Vec<(Syn<F>, Syn<F>)>,
-  ) -> Ptr<F> {
-    // We need to sort the entries by Ptr value first
-    let mut sorted: BTreeMap<Ptr<F>, Ptr<F>> = BTreeMap::new();
-    for (k, v) in xs {
-      let key_ptr = self.intern_syn(cache, k);
-      let val_ptr = self.intern_syn(cache, v);
-      sorted.insert(key_ptr, val_ptr);
-    }
-    // Then construct the cons-list of pairs
-    let mut ptr = self.intern_expr(cache, Expr::ConsNil);
-    for (key_ptr, val_ptr) in sorted.iter().rev() {
-      let head_ptr = self.intern_expr(cache, Expr::Cons(*key_ptr, *val_ptr));
-      ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
-    }
-    self.intern_expr(cache, Expr::Map(ptr))
-  }
-
-  pub fn intern_link(
-    &mut self,
-    cache: &PoseidonCache<F>,
-    ctx: &Syn<F>,
-    val: &[u64],
-  ) -> Ptr<F> {
-    let ctx_ptr = self.intern_syn(cache, ctx);
-    let val_ptr = self.intern_list(
-      cache,
-      &val.iter().map(|x| Syn::U64(Pos::No, *x)).collect(),
-      &None,
-    );
-    self.intern_expr(cache, Expr::Link(ctx_ptr, val_ptr))
-  }
-
   pub fn intern_syn(
     &mut self,
     cache: &PoseidonCache<F>,
@@ -162,12 +66,69 @@ impl<F: LurkField> Store<F> {
       Syn::Num(_, f) => self.intern_expr(cache, Expr::Num(*f)),
       Syn::Char(_, c) => self.intern_expr(cache, Expr::Char(F::from_char(*c))),
       Syn::U64(_, x) => self.intern_expr(cache, Expr::U64((*x).into())),
-      Syn::String(_, s) => self.intern_string(cache, s),
-      Syn::Symbol(_, sym) => self.intern_symbol(cache, sym),
-      Syn::Keyword(_, sym) => self.intern_keyword(cache, sym),
-      Syn::List(_, xs, end) => self.intern_list(cache, xs, end),
-      Syn::Map(_, map) => self.intern_map(cache, map),
-      Syn::Link(_, ctx, val) => self.intern_link(cache, ctx, val),
+      Syn::String(_, string) => {
+        let mut ptr = self.intern_expr(cache, Expr::StrNil);
+        for c in string.chars().rev() {
+          let char_ptr =
+            Ptr { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
+          ptr = self.intern_expr(cache, Expr::StrCons(char_ptr, ptr));
+        }
+        ptr
+      },
+      Syn::Symbol(_, sym) => {
+        let mut ptr = self.intern_expr(cache, Expr::SymNil);
+        for s in sym {
+          let str_ptr =
+            self.intern_syn(cache, &Syn::String(Pos::No, s.clone()));
+          ptr = self.intern_expr(cache, Expr::SymCons(str_ptr, ptr));
+        }
+        ptr
+      },
+      Syn::List(_, xs, end) => {
+        if let (Some(end), true) = (end, xs.is_empty()) {
+          let nil_ptr = self.intern_expr(cache, Expr::ConsNil);
+          let end_ptr = self.intern_syn(cache, end);
+          return self.intern_expr(cache, Expr::Cons(end_ptr, nil_ptr));
+        }
+        let mut ptr = match end {
+          Some(end) => self.intern_syn(cache, end),
+          None => self.intern_expr(cache, Expr::ConsNil),
+        };
+        for x in xs.iter().rev() {
+          let head_ptr = self.intern_syn(cache, x);
+          ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
+        }
+        ptr
+      },
+      Syn::Map(_, map) => {
+        // We need to sort the entries by Ptr value first
+        let mut sorted: BTreeMap<Ptr<F>, Ptr<F>> = BTreeMap::new();
+        for (k, v) in map {
+          let key_ptr = self.intern_syn(cache, k);
+          let val_ptr = self.intern_syn(cache, v);
+          sorted.insert(key_ptr, val_ptr);
+        }
+        // Then construct the cons-list of pairs
+        let mut ptr = self.intern_expr(cache, Expr::ConsNil);
+        for (key_ptr, val_ptr) in sorted.iter().rev() {
+          let head_ptr =
+            self.intern_expr(cache, Expr::Cons(*key_ptr, *val_ptr));
+          ptr = self.intern_expr(cache, Expr::Cons(head_ptr, ptr));
+        }
+        self.intern_expr(cache, Expr::Map(ptr))
+      },
+      Syn::Link(_, ctx, val) => {
+        let ctx_ptr = self.intern_syn(cache, ctx);
+        let val_ptr = self.intern_syn(
+          cache,
+          &Syn::List(
+            Pos::No,
+            val.iter().map(|x| Syn::U64(Pos::No, *x)).collect(),
+            None,
+          ),
+        );
+        self.intern_expr(cache, Expr::Link(ctx_ptr, val_ptr))
+      },
     }
   }
 
@@ -317,7 +278,6 @@ impl<F: LurkField> Store<F> {
       Expr::Cons(..) => self.get_syn_list(ptr),
       Expr::StrCons(..) => Ok(Syn::String(Pos::No, self.get_string(ptr)?)),
       Expr::SymCons(..) => Ok(Syn::Symbol(Pos::No, self.get_symbol(ptr)?)),
-      Expr::Keyword(sym) => Ok(Syn::Keyword(Pos::No, self.get_symbol(sym)?)),
       Expr::Map(map) => self.get_syn_map(map),
       Expr::Link(ctx, data) => self.get_syn_link(ctx, data),
       _ => Err(StoreError::Custom("no syntax for Comm, Thunk, Fun")),
@@ -436,7 +396,6 @@ mod test {
   #[allow(unused_imports)]
   use crate::{
     char,
-    key,
     list,
     map,
     num,

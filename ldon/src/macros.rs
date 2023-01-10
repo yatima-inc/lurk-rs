@@ -67,30 +67,6 @@ macro_rules! sym {
 }
 
 #[macro_export]
-macro_rules! key {
-    ([$( $x:literal ),*] ) => {
-        {
-            #[allow(unused_mut)]
-            let mut temp_vec = Vec::new();
-            $(
-                temp_vec.push($x.to_string());
-            )*
-            $crate::syntax::Syn::Keyword(Pos::No, temp_vec)
-        }
-    };
-    ($f:ty,  [$( $x:literal ),*] ) => {
-        {
-            #[allow(unused_mut)]
-            let mut temp_vec = Vec::new();
-            $(
-                temp_vec.push($x.to_string());
-            )*
-            $crate::syntax::Syn::<$f>::Keyword(Pos::No, temp_vec)
-        }
-    };
-}
-
-#[macro_export]
 macro_rules! list {
     ([$( $x:expr ),*], $end:expr ) => {
         {

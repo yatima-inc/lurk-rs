@@ -26,7 +26,6 @@ pub enum Expr<F: LurkField> {
   Comm(Ptr<F>, Ptr<F>),        // secret, val
   SymNil,                      //
   SymCons(Ptr<F>, Ptr<F>),     // head, tail
-  Keyword(Ptr<F>),             // symbol
   StrNil,                      //
   StrCons(Ptr<F>, Ptr<F>),     // head, tail
   Thunk(Ptr<F>, Ptr<F>),       // val, cont
@@ -65,7 +64,6 @@ impl<F: LurkField> Expr<F> {
       Expr::Comm(secret, payload) => vec![*secret, *payload],
       Expr::SymNil => vec![],
       Expr::SymCons(head, tail) => vec![*head, *tail],
-      Expr::Keyword(symbol) => vec![*symbol],
       Expr::Fun(arg, body, closed_env) => vec![*arg, *body, *closed_env],
       Expr::Num(_) => vec![],
       Expr::StrNil => vec![],
@@ -121,9 +119,6 @@ impl<F: LurkField> Expr<F> {
           F::from_tag_unchecked(tail.tag),
           tail.val,
         ]),
-      },
-      Expr::Keyword(symbol) => {
-        Ptr { tag: F::expr_tag(ExprTag::Key), val: symbol.val }
       },
       Expr::Fun(arg, body, env) => Ptr {
         tag: F::expr_tag(ExprTag::Fun),
@@ -374,10 +369,6 @@ impl<F: LurkField> SerdeF<F> for Expr<F> {
           let map = Ptr::de_f(&fs[2..])?;
           Ok(Expr::Map(map))
         },
-        ExprTag::Key => {
-          let sym = Ptr::de_f(&fs[2..])?;
-          Ok(Expr::Keyword(sym))
-        },
         ExprTag::Call => {
           let arg = Ptr::de_f(&fs[2..])?;
           let env = Ptr::de_f(&fs[4..])?;
@@ -497,7 +488,6 @@ pub mod test_utils {
           100,
           Box::new(|g| Self::SymCons(Ptr::arbitrary(g), Ptr::arbitrary(g))),
         ),
-        (100, Box::new(|g| Self::Keyword(Ptr::arbitrary(g)))),
         (100, Box::new(|g| Self::Num(FWrap::arbitrary(g).0))),
         (100, Box::new(|g| Self::Char(FWrap::arbitrary(g).0))),
         (100, Box::new(|g| Self::U64(FWrap::arbitrary(g).0))),

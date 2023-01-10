@@ -66,14 +66,9 @@ pub fn parse_space1<F: LurkField>(
 pub fn parse_syn_symnil<F: LurkField>(
 ) -> impl Fn(Span) -> IResult<Span, Syn<F>, ParseError<Span, F>> {
   move |from: Span| {
-    let (upto, tag) = alt((tag("_:"), tag("_.")))(from)?;
+    let (upto, _) = tag("_.")(from)?;
     let pos = Pos::from_upto(from, upto);
-    if *tag.fragment() == "_." {
-      Ok((upto, Syn::Symbol(pos, vec![])))
-    }
-    else {
-      Ok((upto, Syn::Keyword(pos, vec![])))
-    }
+    Ok((upto, Syn::Symbol(pos, vec![])))
   }
 }
 
@@ -82,7 +77,6 @@ pub fn parse_syn_sym<F: LurkField>(
   move |from: Span| {
     let (i, root) = alt((
       char('.'),
-      char(':'),
       value(
         '.',
         peek(none_of(
@@ -93,16 +87,10 @@ pub fn parse_syn_sym<F: LurkField>(
     ))(from)?;
     let (upto, limbs) = separated_list1(
       char(root),
-      string::parse_string_inner(root, false, ".:,=(){}[]"),
+      string::parse_string_inner(root, false, ".,=(){}[]"),
     )(i)?;
-    // println!("limbs {:?}", limbs);
     let pos = Pos::from_upto(from, upto);
-    if root == ':' {
-      Ok((upto, Syn::Keyword(pos, limbs)))
-    }
-    else {
-      Ok((upto, Syn::Symbol(pos, limbs)))
-    }
+    Ok((upto, Syn::Symbol(pos, limbs)))
   }
 }
 
@@ -140,7 +128,7 @@ pub fn parse_syn_num<F: LurkField>(
       success(base::LitBase::Dec),
     ))(from)?;
     let (upto, bytes): (Span, Vec<u8>) = base::parse_litbase_le_bytes(base)(i)?;
-    let max_bytes = (F::zero() - F::one()).to_le_bytes_noncanonical();
+    let max_bytes = (F::zero() - F::one()).to_le_bytes_canonical();
     let max_uint = num_bigint::BigUint::from_bytes_le(&max_bytes);
     if num_bigint::BigUint::from_bytes_le(&bytes) > max_uint {
       ParseError::throw(
@@ -150,7 +138,7 @@ pub fn parse_syn_num<F: LurkField>(
     }
     else {
       let pos = Pos::from_upto(from, upto);
-      Ok((upto, Syn::Num(pos, F::from_le_bytes_noncanonical(&bytes))))
+      Ok((upto, Syn::Num(pos, F::from_le_bytes_canonical(&bytes))))
     }
   }
 }
@@ -302,7 +290,6 @@ pub mod tests {
   #[allow(unused_imports)]
   use crate::{
     char,
-    key,
     list,
     map,
     num,
@@ -372,32 +359,6 @@ pub mod tests {
   }
 
   #[test]
-  fn unit_parse_keyword() {
-    assert!(test(parse_syn_sym(), "", None));
-    assert!(test(parse_syn(), "_:", Some(key!([]))));
-    assert!(test(parse_syn(), ":", Some(key!([""]))));
-    assert!(test(parse_syn(), "::", Some(key!(["", ""]))));
-    assert!(test(parse_syn(), ":foo", Some(key!(["foo"]))));
-    assert!(test(parse_syn(), "::foo", Some(key!(["", "foo"]))));
-    assert!(test(parse_syn(), ":foo:", Some(key!(["foo", ""]))));
-    assert!(test(parse_syn(), ":foo::", Some(key!(["foo", "", ""]))));
-    assert!(test(parse_syn(), ":foo:bar", Some(key!(["foo", "bar"]))));
-    assert!(test(parse_syn(), ":foo?:bar?", Some(key!(["foo?", "bar?"]))));
-    assert!(test(parse_syn(), ":fooλ:barλ", Some(key!(["fooλ", "barλ"]))));
-    assert!(test(
-      parse_syn(),
-      ":foo\\n:bar\\n",
-      Some(key!(["foo\n", "bar\n"]))
-    ));
-    assert!(test(
-      parse_syn(),
-      ":foo\\u{00}:bar\\u{00}",
-      Some(key!(["foo\u{00}", "bar\u{00}"]))
-    ));
-    assert!(test(parse_syn(), ":foo\\:bar", Some(key!(["foo:bar"]))));
-  }
-
-  #[test]
   fn unit_parse_map() {
     assert!(test(parse_syn(), "{}", Some(map!([]))));
     assert!(test(
@@ -407,15 +368,6 @@ pub mod tests {
         (char!('a'), u64!(1)),
         (char!('b'), u64!(2)),
         (char!('c'), u64!(3))
-      ]))
-    ));
-    assert!(test(
-      parse_syn(),
-      "{ :a = 1u64,  :b = 2u64,  :c = 3u64 }",
-      Some(map!([
-        (key!(["a"]), u64!(1)),
-        (key!(["b"]), u64!(2)),
-        (key!(["c"]), u64!(3))
       ]))
     ));
   }
@@ -524,7 +476,7 @@ pub mod tests {
     assert!(test(
       parse_syn(),
       "(0x6e2e5055dcf61486b03bb80ed2b3f1a35c30e122defebae824fae4ed32408e87)",
-      Some(list!([num!(Fr::from_le_bytes_noncanonical(&vec))])),
+      Some(list!([num!(Fr::from_le_bytes_canonical(&vec))])),
     ));
 
     assert!(test(parse_syn(), ".\\.", Some(sym!(["."]))));
@@ -541,10 +493,10 @@ pub mod tests {
     ));
     assert!(test(
       parse_syn(),
-      "(_:, 11242421860377074631u64, :\u{ae}\u{60500}\u{87}::)",
+      "(_., 11242421860377074631u64, .\u{ae}\u{60500}\u{87}..)",
       Some(list!(
-        [key!([]), u64!(11242421860377074631)],
-        key!(["®\u{60500}\u{87}", "", ""])
+        [sym!([]), u64!(11242421860377074631)],
+        sym!(["®\u{60500}\u{87}", "", ""])
       ))
     ));
   }
