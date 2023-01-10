@@ -1454,6 +1454,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.5",
+ "rayon",
  "string-interner",
 ]
 
