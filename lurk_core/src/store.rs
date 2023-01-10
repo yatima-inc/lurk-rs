@@ -18,6 +18,7 @@ use lurk_ff::{
 use rayon::prelude::*;
 
 use crate::{
+  error::StoreError,
   expr::Expr,
   num::Num,
   ptr::{
@@ -96,19 +97,6 @@ impl<F: LurkField> Default for Store<F> {
 
     store
   }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StoreError<F: LurkField> {
-  ExpectedExpr(Ptr<F>),
-  UnknownPtr(Ptr<F>),
-  UnknownCid(Cid<F>),
-  InvalidOp1Ptr(Ptr<F>, String),
-  InvalidOp2Ptr(Ptr<F>, String),
-  LdonErr(ldon::StoreError<F>),
-  MalformedStore(Ptr<F>),
-  MalformedLdonStore(Cid<F>, ldon::Store<F>),
-  Custom(&'static str),
 }
 
 impl<F: LurkField> Store<F> {
@@ -727,6 +715,81 @@ impl<F: LurkField> Store<F> {
       self.dehydrated.push(ptr);
     }
     Ok(ptr)
+  }
+
+  pub fn insert_string(
+    &mut self,
+    string: String,
+  ) -> Result<Ptr<F>, StoreError<F>> {
+    let mut ptr = self.insert_expr(Expr::StrNil)?;
+    for c in string.chars().rev() {
+      let char_ptr = self.insert_expr(Expr::Char(c))?;
+      ptr = self.insert_expr(Expr::StrCons(char_ptr, ptr))?;
+    }
+    Ok(ptr)
+  }
+
+  pub fn insert_symbol(
+    &mut self,
+    sym: Vec<String>,
+  ) -> Result<Ptr<F>, StoreError<F>> {
+    let mut ptr = self.insert_expr(Expr::SymNil)?;
+    for s in sym {
+      let str_ptr = self.insert_string(s)?;
+      ptr = self.insert_expr(Expr::SymCons(str_ptr, ptr))?;
+    }
+    Ok(ptr)
+  }
+
+  pub fn nil(&mut self) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::ConsNil)
+  }
+
+  pub fn cons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::Cons(car, cdr))
+  }
+
+  pub fn strnil(&mut self) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::StrNil)
+  }
+
+  pub fn strcons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::StrCons(car, cdr))
+  }
+
+  pub fn symnil(&mut self) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::SymNil)
+  }
+
+  pub fn symcons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, StoreError<F>> {
+    self.insert_expr(Expr::SymCons(car, cdr))
+  }
+
+  pub fn car_cdr(
+    &mut self,
+    ptr: &Ptr<F>,
+  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+    match self.get_expr(ptr)? {
+      Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
+      Expr::Cons(car, cdr) => Ok((car, cdr)),
+      Expr::StrNil => Ok((self.strnil()?, self.strnil()?)),
+      Expr::StrCons(car, cdr) => Ok((car, cdr)),
+      Expr::SymNil => Ok((self.strnil()?, self.strnil()?)),
+      Expr::SymCons(car, cdr) => Ok((car, cdr)),
+      _ => Err(StoreError::CantCarCdr(*ptr)),
+    }
   }
 
   /// Fill the cache for Cid. Only Ptrs which have been inserted since

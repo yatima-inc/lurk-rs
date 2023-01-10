@@ -15,10 +15,12 @@ extern crate quickcheck;
 extern crate quickcheck_macros;
 
 // pub mod circuit;
-// pub mod eval;
-// pub mod hash_witness;
+pub mod cons;
+pub mod eval;
+pub mod hash_witness;
 // pub mod proof;
 // pub mod repl;
+pub mod error;
 pub mod expr;
 pub mod num;
 pub mod ptr;

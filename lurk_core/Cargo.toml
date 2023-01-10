@@ -12,6 +12,8 @@ ahash = "0.7.6"
 indexmap = { version = "1.8.0", features = ["rayon"] }
 dashmap = "5.0.0"
 rayon = "1.6.1"
+bellperson = "0.24"
+nova = { package = "nova-snark", version = "0.9.0", default-features = false }
 
 lurk_ff = { path = "../lurk_ff", optional = true }
 ldon = { path = "../ldon", optional = true }
