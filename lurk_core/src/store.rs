@@ -734,6 +734,20 @@ impl<F: LurkField> Store<F> {
     Ok(ptr)
   }
 
+  pub fn insert_scalar(
+    &mut self,
+    scalar: F,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    Ok(self.insert_expr(Expr::Num(Num::Scalar(scalar)))?)
+  }
+
+  pub fn insert_u64(
+    &mut self,
+    u64: u64,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    Ok(self.insert_expr(Expr::Num(Num::U64(u64)))?)
+  }
+
   pub fn insert_string(
     &mut self,
     string: String,
@@ -829,32 +843,22 @@ pub mod test {
 
   use super::*;
   use blstrs::Scalar as Fr;
-  use ldon::{syntax::Syn, Store as LStore, parser::position::Pos::No};
 
   #[test]
   fn equality() {
-    let num_syn = Syn::<Fr>::U64(No, 123);
-    let str_syn = Syn::<Fr>::String(No, "pumpkin".to_string());
-
-    let cache = PoseidonCache::<Fr>::default();
-    let ldon_store = LStore::<Fr>::default();
-
-    let num_cid = ldon_store.insert_syn(&cache, &num_syn);
-    let str_cid = ldon_store.insert_syn(&cache, &str_syn);
-
     let store = Store::<Fr>::default();
 
-    let num_ptr1 = store.insert_cid(num_cid, &ldon_store).expect("failed to insert num");
-    let str_ptr1 = store.insert_cid(str_cid, &ldon_store).expect("failed to insert str");
+    let num_ptr1 = store.insert_u64(123).expect("failed to insert u64");
+    let str_ptr1 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
     let cons_ptr1 = store.insert_expr(Expr::Cons(num_ptr1, str_ptr1)).expect("failed to insert cons");
-    let num_expr1 = store.get_expr(&num_ptr1).expect("failed to get num");
+    let num_expr1 = store.get_expr(&num_ptr1).expect("failed to get u64");
     let str_expr1 = store.get_expr(&str_ptr1).expect("failed to get str");
     let cons_expr1 = store.get_expr(&cons_ptr1).expect("failed to get cons");
 
-    let num_ptr2 = store.insert_cid(num_cid, &ldon_store).expect("failed to insert num");
-    let str_ptr2 = store.insert_cid(str_cid, &ldon_store).expect("failed to insert str");
+    let num_ptr2 = store.insert_u64(123).expect("failed to insert u64");
+    let str_ptr2 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
     let cons_ptr2 = store.insert_expr(Expr::Cons(num_ptr2, str_ptr2)).expect("failed to insert cons");
-    let num_expr2 = store.get_expr(&num_ptr2).expect("failed to get num");
+    let num_expr2 = store.get_expr(&num_ptr2).expect("failed to get u64");
     let str_expr2 = store.get_expr(&str_ptr2).expect("failed to get str");
     let cons_expr2 = store.get_expr(&cons_ptr2).expect("failed to get cons");
 

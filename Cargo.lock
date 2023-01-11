@@ -1445,18 +1445,20 @@ name = "lurk_core"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "bellperson",
  "blstrs",
  "dashmap",
  "indexmap",
  "ldon",
+ "log",
  "lurk_core",
  "lurk_ff",
+ "nova-snark",
  "once_cell",
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.5",
  "rayon",
- "string-interner",
 ]
 
 [[package]]
