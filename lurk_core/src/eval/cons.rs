@@ -1,7 +1,7 @@
 use lurk_ff::LurkField;
 
 use crate::{
-  error::StoreError,
+  error::LurkError,
   expr::Expr,
   ptr::Ptr,
   store::Store,
@@ -18,7 +18,7 @@ impl<F: LurkField> Cons<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     store.insert_expr(Expr::Cons(car, cdr))
   }
 
@@ -26,16 +26,16 @@ impl<F: LurkField> Cons<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     store.insert_expr(Expr::StrCons(car, cdr))
   }
 
   pub fn car_cdr(
     &self,
     cons: &Ptr<F>,
-  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     if *cons != self.cons {
-      Err(StoreError::Custom("wrong cons"))
+      Err(LurkError::Custom("wrong cons"))
     }
     else {
       Ok((self.car, self.cdr))
@@ -45,7 +45,7 @@ impl<F: LurkField> Cons<F> {
   pub fn get_car_cdr(
     s: &mut Store<F>,
     cons: &Ptr<F>,
-  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     s.car_cdr(cons)
   }
 }

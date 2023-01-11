@@ -1,4 +1,3 @@
-use bellperson::SynthesisError;
 use ldon::{
   self,
   Cid,
@@ -7,29 +6,32 @@ use lurk_ff::LurkField;
 use nova::errors::NovaError;
 
 // use thiserror::Error;
-use crate::{
-  ptr::Ptr,
-  store::Store,
-};
-
-#[derive(Debug, Clone)]
-pub enum LurkError<F: LurkField> {
-  Eval(String),
-  Reduce(String),
-  Store(StoreError<F>),
-  // Parser(#[from] ParserError),
-}
+use crate::ptr::Ptr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StoreError<F: LurkField> {
+pub enum LurkError<F: LurkField> {
+  Nova(NovaError),
+  // bellperson::SynthesisError doesn't implement Clone and Eq, so if we hit
+  // this convert it to its Debug string.
+  Synthesis(String),
+  Eval(String),
+  Reduce(String),
+  // StoreErrors
   ExpectedExpr(Ptr<F>),
   UnknownPtr(Ptr<F>),
   CantCarCdr(Ptr<F>),
   UnknownCid(Cid<F>),
   InvalidOp1Ptr(Ptr<F>, String),
   InvalidOp2Ptr(Ptr<F>, String),
-  LdonErr(ldon::StoreError<F>),
+  LdonStore(ldon::StoreError<F>),
   MalformedStore(Ptr<F>),
   MalformedLdonStore(Cid<F>, ldon::Store<F>),
+  Incomplete,
   Custom(&'static str),
+}
+
+impl<F: LurkField> LurkError<F> {
+  pub fn synthesis_error(value: bellperson::SynthesisError) -> Self {
+    Self::Synthesis(format!("{:?}", value))
+  }
 }

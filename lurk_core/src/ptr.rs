@@ -1,5 +1,6 @@
 use std::{
   hash::Hash,
+  io,
   marker::PhantomData,
 };
 
@@ -7,6 +8,11 @@ use lurk_ff::{
   tag::ExprTag,
   LurkField,
   Tag,
+};
+
+use crate::{
+  store::Store,
+  writer::Write,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,3 +91,25 @@ impl<F: LurkField> From<char> for Ptr<F> {
     }
   }
 }
+
+// impl<F: LurkField> Write<F> for Ptr<F> {
+//  fn fmt<W: io::Write>(&self, store: &Store<F>, w: &mut W) -> io::Result<()> {
+//    if self.is_opaque() {
+//      // This should never fail.
+//      write!(w, "<Opaque ")?;
+//      write!(w, "{:?}", self.tag())?;
+//
+//      if let Some(x) = store.get_expr_hash(self) {
+//        write!(w, " ")?;
+//        Expr::Num(crate::num::Num::Scalar(*x.value())).fmt(store, w)?;
+//      }
+//      write!(w, ">")
+//    }
+//    else if let Some(expr) = store.fetch(self) {
+//      expr.fmt(store, w)
+//    }
+//    else {
+//      Ok(())
+//    }
+//  }
+//}

@@ -15,9 +15,7 @@ extern crate quickcheck;
 extern crate quickcheck_macros;
 
 // pub mod circuit;
-pub mod cons;
 pub mod eval;
-pub mod hash_witness;
 // pub mod proof;
 // pub mod repl;
 pub mod error;
@@ -27,11 +25,8 @@ pub mod ptr;
 pub mod store;
 pub mod uint;
 // pub mod sym;
-// pub mod uint;
-// pub mod writer;
-//
-// mod error;
-// mod num;
+pub mod writer;
+
 // pub use num::Num;
 // pub use sym::{Sym, Symbol};
 // pub use uint::UInt;

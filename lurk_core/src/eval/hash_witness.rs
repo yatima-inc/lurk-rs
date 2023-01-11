@@ -1,9 +1,8 @@
 use lurk_ff::LurkField;
 
 use crate::{
-  cons::Cons,
-  error::StoreError,
-  expr::Expr,
+  error::LurkError,
+  eval::cons::Cons,
   ptr::Ptr,
   store::Store,
 };
@@ -92,7 +91,7 @@ impl<F: LurkField> HashStub<F> {
     &mut self,
     s: &mut Store<F>,
     cons: &Ptr<F>,
-  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     match self {
       Self::Dummy => {
         let (car, cdr) = Cons::get_car_cdr(s, cons)?;
@@ -111,7 +110,7 @@ impl<F: LurkField> HashStub<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     match self {
       Self::Dummy => {
         let cons = Cons::cons(store, car, cdr)?;
@@ -130,7 +129,7 @@ impl<F: LurkField> HashStub<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     match self {
       Self::Dummy => {
         let cons = Cons::strcons(store, car, cdr)?;
@@ -191,7 +190,7 @@ impl<F: LurkField> HashWitness<F> {
     name: ConsName,
     store: &mut Store<F>,
     cons: &Ptr<F>,
-  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     self.get_assigned_slot(name).car_cdr(store, cons)
   }
 
@@ -201,7 +200,7 @@ impl<F: LurkField> HashWitness<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     self.get_assigned_slot(name).cons(store, car, cdr)
   }
 
@@ -211,7 +210,7 @@ impl<F: LurkField> HashWitness<F> {
     store: &mut Store<F>,
     car: Ptr<F>,
     cdr: Ptr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     self.get_assigned_slot(name).strcons(store, car, cdr)
   }
 
@@ -220,7 +219,7 @@ impl<F: LurkField> HashWitness<F> {
     name: ConsName,
     store: &mut Store<F>,
     cons: &Ptr<F>,
-  ) -> Result<(Ptr<F>, Ptr<F>), StoreError<F>> {
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     self.get_assigned_slot(name).car_cdr(store, cons)
   }
 
@@ -231,7 +230,7 @@ impl<F: LurkField> HashWitness<F> {
     var: Ptr<F>,
     val: Ptr<F>,
     store: &mut Store<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     let binding = self.cons_named(ConsName::Binding, store, var, val)?;
     self.cons_named(name, store, binding, env)
   }
