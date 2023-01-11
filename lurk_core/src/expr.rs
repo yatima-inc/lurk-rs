@@ -1,6 +1,9 @@
-use ldon::op::{
-  Op1,
-  Op2,
+use ldon::{
+  op::{
+    Op1,
+    Op2,
+  },
+  sym::Symbol,
 };
 use lurk_ff::LurkField;
 
@@ -11,16 +14,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Expr<F: LurkField> {
-  ConsNil,                                //
-  Cons(Ptr<F>, Ptr<F>),                   // car, cdr
-  Comm(Ptr<F>, Ptr<F>),                   // secret, payload
-  SymNil,                                 //
-  SymCons(Ptr<F>, Ptr<F>),                // head, tail
-  Fun(Ptr<F>, Ptr<F>, Ptr<F>),            // arg, body, env
-  Num(Num<F>),                            //
-  StrNil,                                 //
-  StrCons(Ptr<F>, Ptr<F>),                // head, tail
+pub enum Expr<'a, F: LurkField> {
+  ConsNil,              //
+  Cons(Ptr<F>, Ptr<F>), // car, cdr
+  Comm(Ptr<F>, Ptr<F>), // secret, payload
+  Sym(Symbol),
+  Fun(Ptr<F>, Ptr<F>, Ptr<F>), // arg, body, env
+  Num(Num<F>),                 //
+  Str(&'a str),
   Thunk(Ptr<F>, Ptr<F>),                  // val, cont
   Char(char),                             //
   UInt(UInt),                             //

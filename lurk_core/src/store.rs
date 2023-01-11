@@ -16,6 +16,10 @@ use lurk_ff::{
 // use std::fmt;
 // use once_cell::sync::OnceCell;
 use rayon::prelude::*;
+use string_interner::symbol::{
+  Symbol,
+  SymbolUsize,
+};
 
 use crate::{
   error::LurkError,
@@ -28,16 +32,27 @@ use crate::{
 };
 
 type IndexSet<K> = indexmap::IndexSet<K, RandomState>;
+#[derive(Debug)]
+pub struct StringSet(
+  pub  string_interner::StringInterner<
+    string_interner::backend::BufferBackend<SymbolUsize>,
+    ahash::RandomState,
+  >,
+);
+
+impl Default for StringSet {
+  fn default() -> Self { StringSet(string_interner::StringInterner::new()) }
+}
 
 #[derive(Debug)]
 pub struct Store<F: LurkField> {
   pub conses: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub comms: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub funs: IndexSet<(Ptr<F>, Ptr<F>, Ptr<F>)>,
-  pub syms: IndexSet<(Ptr<F>, Ptr<F>)>,
+  pub syms: StringSet,
   // Other sparse storage format without hashing is likely more efficient
   pub nums: IndexSet<Num<F>>,
-  pub strs: IndexSet<(Ptr<F>, Ptr<F>)>,
+  pub strs: StringSet,
   pub thunks: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub call0s: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub calls: IndexSet<(Ptr<F>, Ptr<F>, Ptr<F>)>,
@@ -136,20 +151,16 @@ impl<F: LurkField> Store<F> {
         self.insert_expr(Expr::Comm(secret, payload))
       },
       (ExprTag::Sym, Entry::Expr(ldon::Expr::SymNil)) if val == F::zero() => {
-        self.insert_expr(Expr::SymNil)
+        todo!()
       },
       (ExprTag::Sym, Entry::Expr(ldon::Expr::SymCons(head, tail))) => {
-        let head = self.insert_cid(head, ldon_store)?;
-        let tail = self.insert_cid(tail, ldon_store)?;
-        self.insert_expr(Expr::SymCons(head, tail))
+        todo!()
       },
       (ExprTag::Str, Entry::Expr(ldon::Expr::StrNil)) if val == F::zero() => {
-        self.insert_expr(Expr::StrNil)
+        todo!()
       },
       (ExprTag::Str, Entry::Expr(ldon::Expr::StrCons(head, tail))) => {
-        let head = self.insert_cid(head, ldon_store)?;
-        let tail = self.insert_cid(tail, ldon_store)?;
-        self.insert_expr(Expr::StrCons(head, tail))
+        todo!()
       },
       (ExprTag::Num, Entry::Expr(ldon::Expr::Num(f))) => {
         self.insert_expr(Expr::Num(Num::Scalar(f)))
@@ -318,11 +329,8 @@ impl<F: LurkField> Store<F> {
           self.comms.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Comm(*secret, *payload))
       },
-      (ExprTag::Sym, RawPtr::Null) => Ok(Expr::SymNil),
       (ExprTag::Sym, RawPtr::Index(idx)) => {
-        let (head, tail) =
-          self.syms.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
-        Ok(Expr::SymCons(*head, *tail))
+        todo!()
       },
       (ExprTag::Fun, RawPtr::Index(idx)) => {
         let (arg, body, env) =
@@ -334,11 +342,8 @@ impl<F: LurkField> Store<F> {
           self.nums.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Num(*num))
       },
-      (ExprTag::Str, RawPtr::Null) => Ok(Expr::StrNil),
       (ExprTag::Str, RawPtr::Index(idx)) => {
-        let (head, tail) =
-          self.strs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
-        Ok(Expr::StrCons(*head, *tail))
+        todo!()
       },
       (ExprTag::Thunk, RawPtr::Index(idx)) => {
         let (val, cont) =
@@ -470,11 +475,8 @@ impl<F: LurkField> Store<F> {
           let payload = self.hash_expr_aux(&payload, cache_mode)?;
           Ok(ldon::Expr::Comm(secret, payload).cid(&self.poseidon_cache))
         },
-        Expr::SymNil => Ok(ldon::Expr::SymNil.cid(&self.poseidon_cache)),
-        Expr::SymCons(head, tail) => {
-          let head = self.hash_expr_aux(&head, cache_mode)?;
-          let tail = self.hash_expr_aux(&tail, cache_mode)?;
-          Ok(ldon::Expr::SymCons(head, tail).cid(&self.poseidon_cache))
+        Expr::Sym(sym) => {
+          todo!()
         },
         Expr::Fun(arg, body, env) => {
           let arg = self.hash_expr_aux(&arg, cache_mode)?;
@@ -485,12 +487,8 @@ impl<F: LurkField> Store<F> {
         Expr::Num(num) => {
           Ok(ldon::Expr::Num(num.into_scalar()).cid(&self.poseidon_cache))
         },
-
-        Expr::StrNil => Ok(ldon::Expr::StrNil.cid(&self.poseidon_cache)),
-        Expr::StrCons(head, tail) => {
-          let head = self.hash_expr_aux(&head, cache_mode)?;
-          let tail = self.hash_expr_aux(&tail, cache_mode)?;
-          Ok(ldon::Expr::StrCons(head, tail).cid(&self.poseidon_cache))
+        Expr::Str(string) => {
+          todo!()
         },
         Expr::Thunk(val, cont) => {
           let val = self.hash_expr_aux(&val, cache_mode)?;
@@ -599,19 +597,13 @@ impl<F: LurkField> Store<F> {
         let (p, inserted) = self.conses.insert_full((secret, payload));
         Ok((Ptr::index(ExprTag::Comm, p), inserted))
       },
-      Expr::StrNil => Ok((Ptr::null(ExprTag::Str), false)),
-      Expr::StrCons(head, tail) => {
-        self.cache_if_opaque(&head)?;
-        self.cache_if_opaque(&tail)?;
-        let (p, inserted) = self.conses.insert_full((head, tail));
-        Ok((Ptr::index(ExprTag::Str, p), inserted))
+      // Expr::Str(_) => Ok((Ptr::null(ExprTag::Str), false)),
+      Expr::Str(_) => {
+        todo!()
       },
-      Expr::SymNil => Ok((Ptr::null(ExprTag::Sym), false)),
-      Expr::SymCons(head, tail) => {
-        self.cache_if_opaque(&head)?;
-        self.cache_if_opaque(&tail)?;
-        let (p, inserted) = self.conses.insert_full((head, tail));
-        Ok((Ptr::index(ExprTag::Sym, p), inserted))
+      // Expr::SymNil => Ok((Ptr::null(ExprTag::Sym), false)),
+      Expr::Sym(_) => {
+        todo!()
       },
       Expr::Fun(arg, body, env) => {
         self.cache_if_opaque(&arg)?;
@@ -738,24 +730,26 @@ impl<F: LurkField> Store<F> {
     &mut self,
     string: String,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    let mut ptr = self.insert_expr(Expr::StrNil)?;
-    for c in string.chars().rev() {
-      let char_ptr = self.insert_expr(Expr::Char(c))?;
-      ptr = self.insert_expr(Expr::StrCons(char_ptr, ptr))?;
-    }
-    Ok(ptr)
+    todo!()
+    // let mut ptr = self.insert_expr(Expr::StrNil)?;
+    // for c in string.chars().rev() {
+    //  let char_ptr = self.insert_expr(Expr::Char(c))?;
+    //  ptr = self.insert_expr(Expr::StrCons(char_ptr, ptr))?;
+    //}
+    // Ok(ptr)
   }
 
   pub fn insert_symbol(
     &mut self,
     sym: Vec<String>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    let mut ptr = self.insert_expr(Expr::SymNil)?;
-    for s in sym {
-      let str_ptr = self.insert_string(s)?;
-      ptr = self.insert_expr(Expr::SymCons(str_ptr, ptr))?;
-    }
-    Ok(ptr)
+    todo!()
+    // let mut ptr = self.insert_expr(Expr::SymNil)?;
+    // for s in sym {
+    //  let str_ptr = self.insert_string(s)?;
+    //  ptr = self.insert_expr(Expr::SymCons(str_ptr, ptr))?;
+    //}
+    // Ok(ptr)
   }
 
   pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
@@ -770,28 +764,24 @@ impl<F: LurkField> Store<F> {
     self.insert_expr(Expr::Cons(car, cdr))
   }
 
-  pub fn strnil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::StrNil)
-  }
+  pub fn strnil(&mut self) -> Result<Ptr<F>, LurkError<F>> { todo!() }
 
   pub fn strcons(
     &mut self,
     car: Ptr<F>,
     cdr: Ptr<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::StrCons(car, cdr))
+    todo!()
   }
 
-  pub fn symnil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::SymNil)
-  }
+  pub fn symnil(&mut self) -> Result<Ptr<F>, LurkError<F>> { todo!() }
 
   pub fn symcons(
     &mut self,
     car: Ptr<F>,
     cdr: Ptr<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::SymCons(car, cdr))
+    todo!()
   }
 
   pub fn car_cdr(
@@ -801,10 +791,11 @@ impl<F: LurkField> Store<F> {
     match self.get_expr(ptr)? {
       Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
       Expr::Cons(car, cdr) => Ok((car, cdr)),
-      Expr::StrNil => Ok((self.strnil()?, self.strnil()?)),
-      Expr::StrCons(car, cdr) => Ok((car, cdr)),
-      Expr::SymNil => Ok((self.strnil()?, self.strnil()?)),
-      Expr::SymCons(car, cdr) => Ok((car, cdr)),
+      // TODO:
+      // Expr::StrNil => Ok((self.strnil()?, self.strnil()?)),
+      // Expr::StrCons(car, cdr) => Ok((car, cdr)),
+      // Expr::SymNil => Ok((self.strnil()?, self.strnil()?)),
+      // Expr::SymCons(car, cdr) => Ok((car, cdr)),
       _ => Err(LurkError::CantCarCdr(*ptr)),
     }
   }
@@ -822,4 +813,12 @@ impl<F: LurkField> Store<F> {
     self.dehydrated.truncate(0);
     Ok(())
   }
+  // fn as_lurk_boolean(&mut self, x: bool) -> Ptr<F> {
+  //  if x {
+  //    self.t()
+  //  }
+  //  else {
+  //    self.nil()
+  //  }
+  //}
 }

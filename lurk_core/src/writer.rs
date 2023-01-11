@@ -2,11 +2,11 @@ use std::io;
 
 use lurk_ff::LurkField;
 
-use crate::{
-  expr::Expr,
-  ptr::Ptr,
-  store::Store,
-};
+use crate::store::Store;
+// use crate::{
+//  expr::Expr,
+//  ptr::Ptr,
+//};
 
 pub trait Write<F: LurkField> {
   fn fmt<W: io::Write>(&self, store: &Store<F>, w: &mut W) -> io::Result<()>;

@@ -24,7 +24,6 @@ pub mod num;
 pub mod ptr;
 pub mod store;
 pub mod uint;
-// pub mod sym;
 pub mod writer;
 
 // pub use num::Num;

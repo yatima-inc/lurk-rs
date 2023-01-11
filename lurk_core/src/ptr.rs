@@ -1,19 +1,19 @@
 use std::{
   hash::Hash,
-  io,
   marker::PhantomData,
 };
 
+// use std::io,
 use lurk_ff::{
   tag::ExprTag,
   LurkField,
   Tag,
 };
 
-use crate::{
-  store::Store,
-  writer::Write,
-};
+// use crate::{
+//  store::Store,
+//  writer::Write,
+//};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RawPtr {

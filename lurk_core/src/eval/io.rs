@@ -1,5 +1,6 @@
-use std::fmt;
+// use std::fmt;
 
+// use log::info;
 use lurk_ff::{
   ExprTag,
   LurkField,
@@ -8,18 +9,16 @@ use lurk_ff::{
 use crate::{
   error::LurkError,
   eval::{
-    hash_witness::{
-      ConsName,
-      HashWitness,
-    },
+    evaluator::Evaluable,
+    reduce,
     status::Status,
+    witness::Witness,
   },
   expr::Expr,
-  num::Num,
   ptr::Ptr,
   store::Store,
-  writer::Write,
 };
+// use crate::writer::Write,
 
 #[derive(Clone, Debug, PartialEq, Copy, Eq)]
 pub struct IO<F: LurkField> {
@@ -63,6 +62,42 @@ impl<F: LurkField> IO<F> {
       cont_cid.val,
     ])
   }
+}
+
+impl<F: LurkField> Evaluable<F, Witness<F>> for IO<F> {
+  fn reduce(
+    &self,
+    store: &mut Store<F>,
+  ) -> Result<(Self, Witness<F>), LurkError<F>> {
+    let (expr, env, cont, witness) =
+      reduce(self.expr, self.env, self.cont, store)?;
+    Ok((Self { expr, env, cont }, witness))
+  }
+
+  fn status(&self) -> Status { Status::from(self.cont) }
+
+  fn is_complete(&self) -> bool { self.status().is_complete() }
+
+  fn is_terminal(&self) -> bool { self.status().is_complete() }
+
+  fn is_error(&self) -> bool { self.status().is_error() }
+
+  fn log(&self, store: &Store<F>, i: usize) {}
+  // fn log(&self, store: &Store<F>, i: usize) {
+  //  info!(
+  //    "Frame: {}\n\tExpr: {}\n\tEnv: {}\n\tCont: {}{}\n",
+  //    i,
+  //    self.expr.fmt_to_string(store),
+  //    self.env.fmt_to_string(store),
+  //    self.cont.fmt_to_string(store),
+  //    if let Ok(emitted) = self.maybe_emitted_expression(store) {
+  //      //format!("\n\tOutput: {}", emitted.fmt_to_string(store))
+  //    }
+  //    else {
+  //      "".to_string()
+  //    }
+  //  );
+  //}
 }
 
 // impl<F: LurkField> Write<F> for IO<F> {
