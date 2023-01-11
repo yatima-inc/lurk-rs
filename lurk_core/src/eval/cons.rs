@@ -19,7 +19,7 @@ impl<F: LurkField> Cons<F> {
     car: Ptr<F>,
     cdr: Ptr<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    store.insert_expr(Expr::Cons(car, cdr))
+    store.intern_expr(Expr::Cons(car, cdr))
   }
 
   pub fn strcons(

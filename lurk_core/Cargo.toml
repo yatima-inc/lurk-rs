@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+string-interner = "0.14.0"
 once_cell = "1.9.0"
 ahash = "0.7.6"
 indexmap = { version = "1.8.0", features = ["rayon"] }
@@ -13,6 +14,7 @@ dashmap = "5.0.0"
 rayon = "1.6.1"
 bellperson = "0.24"
 nova = { package = "nova-snark", version = "0.9.0", default-features = false }
+peekmore = "1.0.0"
 log = "0.4.14"
 
 lurk_ff = { path = "../lurk_ff", optional = true }

@@ -75,7 +75,7 @@ where IO<F>: Copy
     Ok(IO {
       expr: self.expr,
       env: self.env,
-      cont: self.store.insert_expr(Expr::Outermost)?,
+      cont: self.store.intern_expr(Expr::Outermost)?,
     })
   }
 

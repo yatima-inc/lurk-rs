@@ -67,8 +67,8 @@ impl<F: LurkField> Control<F> {
     match cont.tag.expr {
       ExprTag::Tail => match store.get_expr(&cont)? {
         Expr::Tail(saved_env, continuation) => {
-          let thunk = store.insert_expr(Expr::Thunk(result, continuation))?;
-          let dummy = store.insert_expr(Expr::Dummy)?;
+          let thunk = store.intern_expr(Expr::Thunk(result, continuation))?;
+          let dummy = store.intern_expr(Expr::Dummy)?;
           Ok(Control::Return(thunk, saved_env, dummy))
         },
         _ => unreachable!(),
@@ -77,12 +77,12 @@ impl<F: LurkField> Control<F> {
       // we signal that this is the terminal result by returning a
       // Terminal continuation.
       ExprTag::Outermost => {
-        let terminal = store.insert_expr(Expr::Terminal)?;
+        let terminal = store.intern_expr(Expr::Terminal)?;
         Ok(Control::Return(result, env, terminal))
       },
       _ => {
-        let thunk = store.insert_expr(Expr::Thunk(result, cont))?;
-        let dummy = store.insert_expr(Expr::Dummy)?;
+        let thunk = store.intern_expr(Expr::Thunk(result, cont))?;
+        let dummy = store.intern_expr(Expr::Dummy)?;
         Ok(Control::Return(thunk, env, dummy))
       },
     }
@@ -99,7 +99,7 @@ impl<F: LurkField> Control<F> {
       ExprTag::Tail => Ok(continuation),
       // Otherwise, package it along with supplied env as a new Tail
       // continuation.
-      _ => store.insert_expr(Expr::Tail(env, continuation)),
+      _ => store.intern_expr(Expr::Tail(env, continuation)),
     }
     // Since this is the only place Tail continuation are created, this ensures
     // Tail continuations never point to one another: they can only be nested
@@ -126,7 +126,7 @@ impl<F: LurkField> Control<F> {
         unreachable!("Dummy Continuation should never be applied.")
       },
       ExprTag::Outermost => {
-        Ok(Control::Return(*result, *env, store.insert_expr(Expr::Terminal)?))
+        Ok(Control::Return(*result, *env, store.intern_expr(Expr::Terminal)?))
       },
       // Although Emit has no effect within the computation, it has an
       // externally-visible side effect of manifesting an explicit Thunk
@@ -160,7 +160,7 @@ impl<F: LurkField> Control<F> {
         },
         // bad function
         _ => {
-          Ok(Control::Return(*result, *env, store.insert_expr(Expr::Error)?))
+          Ok(Control::Return(*result, *env, store.intern_expr(Expr::Error)?))
         },
       },
       _ => todo!(),

@@ -127,7 +127,7 @@ impl<F: LurkField> Store<F> {
     &self.poseidon_cache.constants
   }
 
-  pub fn insert_cid(
+  pub fn intern_cid(
     &mut self,
     cid: Cid<F>,
     ldon_store: &ldon::Store<F>,
@@ -136,130 +136,132 @@ impl<F: LurkField> Store<F> {
     let entry = ldon_store.get_entry(cid).map_err(LurkError::LdonStore)?;
     let Cid { tag, val } = cid;
     match (tag.expr, entry) {
-      (_, Entry::Opaque) => self.insert_opaque_cid(cid, false),
+      (_, Entry::Opaque) => self.intern_opaque_cid(cid, false),
       (ExprTag::Cons, Entry::Expr(ldon::Expr::ConsNil)) if val == F::zero() => {
-        self.insert_expr(Expr::ConsNil)
+        self.intern_expr(Expr::ConsNil)
       },
       (ExprTag::Cons, Entry::Expr(ldon::Expr::Cons(car, cdr))) => {
-        let car = self.insert_cid(car, ldon_store)?;
-        let cdr = self.insert_cid(cdr, ldon_store)?;
-        self.insert_expr(Expr::Cons(car, cdr))
+        let car = self.intern_cid(car, ldon_store)?;
+        let cdr = self.intern_cid(cdr, ldon_store)?;
+        self.intern_expr(Expr::Cons(car, cdr))
       },
       (ExprTag::Comm, Entry::Expr(ldon::Expr::Comm(secret, payload))) => {
-        let secret = self.insert_cid(secret, ldon_store)?;
-        let payload = self.insert_cid(payload, ldon_store)?;
-        self.insert_expr(Expr::Comm(secret, payload))
+        let secret = self.intern_cid(secret, ldon_store)?;
+        let payload = self.intern_cid(payload, ldon_store)?;
+        self.intern_expr(Expr::Comm(secret, payload))
       },
       (ExprTag::Sym, Entry::Expr(ldon::Expr::SymNil)) if val == F::zero() => {
         todo!()
       },
-      (ExprTag::Sym, Entry::Expr(ldon::Expr::SymCons(head, tail))) => {
+      (ExprTag::Sym, Entry::Expr(ldon::Expr::SymCons(car, cdr))) => {
         todo!()
       },
       (ExprTag::Str, Entry::Expr(ldon::Expr::StrNil)) if val == F::zero() => {
-        todo!()
+        self.intern_str("")
       },
-      (ExprTag::Str, Entry::Expr(ldon::Expr::StrCons(head, tail))) => {
-        todo!()
+      (ExprTag::Str, Entry::Expr(ldon::Expr::StrCons(car, cdr))) => {
+        let car = self.intern_cid(car, ldon_store)?;
+        let cdr = self.intern_cid(cdr, ldon_store)?;
+        self.intern_strcons(car, cdr)
       },
       (ExprTag::Num, Entry::Expr(ldon::Expr::Num(f))) => {
-        self.insert_expr(Expr::Num(Num::Scalar(f)))
+        self.intern_expr(Expr::Num(Num::Scalar(f)))
       },
       (ExprTag::Char, Entry::Expr(ldon::Expr::Char(..))) => {
         let c = ldon_store.get_char(cid).map_err(LurkError::LdonStore)?;
-        self.insert_expr(Expr::Char(c))
+        self.intern_expr(Expr::Char(c))
       },
       (ExprTag::Thunk, Entry::Expr(ldon::Expr::Thunk(val, cont))) => {
-        let val = self.insert_cid(val, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Thunk(val, cont))
+        let val = self.intern_cid(val, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Thunk(val, cont))
       },
       (ExprTag::Op1, Entry::Expr(ldon::Expr::Op1(op1))) => {
-        self.insert_expr(Expr::Op1(op1))
+        self.intern_expr(Expr::Op1(op1))
       },
       (ExprTag::Op2, Entry::Expr(ldon::Expr::Op1(op1))) => {
-        self.insert_expr(Expr::Op1(op1))
+        self.intern_expr(Expr::Op1(op1))
       },
       (ExprTag::Outermost, Entry::Expr(ldon::Expr::Outermost)) => {
-        self.insert_expr(Expr::Outermost)
+        self.intern_expr(Expr::Outermost)
       },
       (ExprTag::Call, Entry::Expr(ldon::Expr::Call(arg, env, cont))) => {
-        let arg = self.insert_cid(arg, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Call(arg, env, cont))
+        let arg = self.intern_cid(arg, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Call(arg, env, cont))
       },
       (ExprTag::Call0, Entry::Expr(ldon::Expr::Call0(env, cont))) => {
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Call0(env, cont))
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Call0(env, cont))
       },
       (ExprTag::Call2, Entry::Expr(ldon::Expr::Call2(fun, env, cont))) => {
-        let fun = self.insert_cid(fun, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Call2(fun, env, cont))
+        let fun = self.intern_cid(fun, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Call2(fun, env, cont))
       },
       (ExprTag::Tail, Entry::Expr(ldon::Expr::Tail(env, cont))) => {
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Tail(env, cont))
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Tail(env, cont))
       },
       (ExprTag::Error, Entry::Expr(ldon::Expr::Error)) => {
-        self.insert_expr(Expr::Error)
+        self.intern_expr(Expr::Error)
       },
       (ExprTag::Unop, Entry::Expr(ldon::Expr::Unop(op1, cont))) => {
-        let op1 = self.insert_cid(op1, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Unop(op1, cont))
+        let op1 = self.intern_cid(op1, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Unop(op1, cont))
       },
       (
         ExprTag::Binop,
         Entry::Expr(ldon::Expr::Binop(op2, env, args, cont)),
       ) => {
-        let op2 = self.insert_cid(op2, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let args = self.insert_cid(args, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Binop(op2, env, args, cont))
+        let op2 = self.intern_cid(op2, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let args = self.intern_cid(args, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Binop(op2, env, args, cont))
       },
       (ExprTag::Binop2, Entry::Expr(ldon::Expr::Binop2(op2, env, cont))) => {
-        let op2 = self.insert_cid(op2, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Binop2(op2, env, cont))
+        let op2 = self.intern_cid(op2, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Binop2(op2, env, cont))
       },
       (ExprTag::If, Entry::Expr(ldon::Expr::If(args, cont))) => {
-        let args = self.insert_cid(args, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::If(args, cont))
+        let args = self.intern_cid(args, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::If(args, cont))
       },
       (ExprTag::Let, Entry::Expr(ldon::Expr::Let(var, body, env, cont))) => {
-        let var = self.insert_cid(var, ldon_store)?;
-        let body = self.insert_cid(body, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Let(var, body, env, cont))
+        let var = self.intern_cid(var, ldon_store)?;
+        let body = self.intern_cid(body, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Let(var, body, env, cont))
       },
       (
         ExprTag::LetRec,
         Entry::Expr(ldon::Expr::LetRec(var, body, env, cont)),
       ) => {
-        let var = self.insert_cid(var, ldon_store)?;
-        let body = self.insert_cid(body, ldon_store)?;
-        let env = self.insert_cid(env, ldon_store)?;
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::LetRec(var, body, env, cont))
+        let var = self.intern_cid(var, ldon_store)?;
+        let body = self.intern_cid(body, ldon_store)?;
+        let env = self.intern_cid(env, ldon_store)?;
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::LetRec(var, body, env, cont))
       },
       (ExprTag::Emit, Entry::Expr(ldon::Expr::Emit(cont))) => {
-        let cont = self.insert_cid(cont, ldon_store)?;
-        self.insert_expr(Expr::Emit(cont))
+        let cont = self.intern_cid(cont, ldon_store)?;
+        self.intern_expr(Expr::Emit(cont))
       },
       (ExprTag::Dummy, Entry::Expr(ldon::Expr::Dummy)) => {
-        self.insert_expr(Expr::Dummy)
+        self.intern_expr(Expr::Dummy)
       },
       (ExprTag::Terminal, Entry::Expr(ldon::Expr::Terminal)) => {
-        self.insert_expr(Expr::Terminal)
+        self.intern_expr(Expr::Terminal)
       },
       _ => Err(LurkError::MalformedLdonStore(cid, ldon_store.clone())),
     }
@@ -269,7 +271,7 @@ impl<F: LurkField> Store<F> {
   // already known to the store, return the known value. If we set `force`
   // we ensure an opaque Ptr, even when the corresponding value is present in
   // the store,
-  fn insert_opaque_cid(
+  fn intern_opaque_cid(
     &mut self,
     cid: Cid<F>,
     force: bool,
@@ -582,7 +584,82 @@ impl<F: LurkField> Store<F> {
     Ok(())
   }
 
-  pub fn insert_expr(&mut self, expr: Expr<F>) -> Result<Ptr<F>, LurkError<F>> {
+  pub fn intern_strcons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    self.cache_if_opaque(&car)?;
+    self.cache_if_opaque(&cdr)?;
+    if let (Expr::Char(c), Expr::Str(s)) =
+      (self.get_expr(&car)?, self.get_expr(&cdr)?)
+    {
+      let new_str = format!("{}{}", c, s);
+      self.intern_str(&new_str)
+    }
+    else {
+      Err(LurkError::Custom("strcons args must be Char and Str"))
+    }
+  }
+
+  pub fn intern_str<T: AsRef<str>>(
+    &mut self,
+    str: T,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    // Hash string for side effect. This will cause all tails to be interned.
+    self.hash_string_mut(str.as_ref())?;
+    self.intern_str_aux(str)
+  }
+
+  pub fn intern_str_aux<T: AsRef<str>>(
+    &mut self,
+    str: T,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    if let Some(ptr) = self.strs.0.get(&str) {
+      Ok(Ptr::index(ExprTag::Str, ptr.to_usize()))
+    }
+    else {
+      let ptr = self.strs.0.get_or_intern(str);
+      let ptr = Ptr::index(ExprTag::Str, ptr.to_usize());
+      self.dehydrated.push(ptr);
+      Ok(ptr)
+    }
+  }
+
+  pub fn hash_string(&self, s: &str) -> Cid<F> {
+    let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
+    for c in s.chars().rev() {
+      let char_cid =
+        Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
+      cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
+    }
+    cid
+  }
+
+  pub fn hash_string_mut<T: AsRef<str>>(
+    &mut self,
+    s: T,
+  ) -> Result<Vec<(Ptr<F>, Cid<F>)>, LurkError<F>> {
+    let mut res = Vec::new();
+    let chars: Vec<char> = s.as_ref().chars().rev().collect();
+    let mut i = 0;
+    let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
+    let ptr = self.intern_str_aux("")?;
+    res.push((ptr, cid));
+    for c in &chars {
+      i += 1;
+      let char_cid =
+        Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(*c) };
+      let substring = (&chars)[0..i].iter().collect::<String>();
+      let ptr = self.intern_str_aux(&substring)?;
+      cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
+      self.cache_cid(ptr, cid, HashMode::Put)?;
+      res.push((ptr, cid));
+    }
+    Ok(res)
+  }
+
+  pub fn intern_expr(&mut self, expr: Expr<F>) -> Result<Ptr<F>, LurkError<F>> {
     let (ptr, inserted) = match expr {
       Expr::ConsNil => Ok((Ptr::null(ExprTag::Cons), false)),
       Expr::Cons(car, cdr) => {
@@ -731,10 +808,10 @@ impl<F: LurkField> Store<F> {
     string: String,
   ) -> Result<Ptr<F>, LurkError<F>> {
     todo!()
-    // let mut ptr = self.insert_expr(Expr::StrNil)?;
+    // let mut ptr = self.intern_expr(Expr::StrNil)?;
     // for c in string.chars().rev() {
-    //  let char_ptr = self.insert_expr(Expr::Char(c))?;
-    //  ptr = self.insert_expr(Expr::StrCons(char_ptr, ptr))?;
+    //  let char_ptr = self.intern_expr(Expr::Char(c))?;
+    //  ptr = self.intern_expr(Expr::StrCons(char_ptr, ptr))?;
     //}
     // Ok(ptr)
   }
@@ -744,16 +821,16 @@ impl<F: LurkField> Store<F> {
     sym: Vec<String>,
   ) -> Result<Ptr<F>, LurkError<F>> {
     todo!()
-    // let mut ptr = self.insert_expr(Expr::SymNil)?;
+    // let mut ptr = self.intern_expr(Expr::SymNil)?;
     // for s in sym {
     //  let str_ptr = self.insert_string(s)?;
-    //  ptr = self.insert_expr(Expr::SymCons(str_ptr, ptr))?;
+    //  ptr = self.intern_expr(Expr::SymCons(str_ptr, ptr))?;
     //}
     // Ok(ptr)
   }
 
   pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::ConsNil)
+    self.intern_expr(Expr::ConsNil)
   }
 
   pub fn cons(
@@ -761,7 +838,7 @@ impl<F: LurkField> Store<F> {
     car: Ptr<F>,
     cdr: Ptr<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    self.insert_expr(Expr::Cons(car, cdr))
+    self.intern_expr(Expr::Cons(car, cdr))
   }
 
   pub fn strnil(&mut self) -> Result<Ptr<F>, LurkError<F>> { todo!() }

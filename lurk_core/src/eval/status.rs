@@ -57,8 +57,8 @@ impl Status {
     s: &mut Store<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
     match self {
-      Self::Terminal => s.insert_expr(Expr::Terminal),
-      Self::Error => s.insert_expr(Expr::Error),
+      Self::Terminal => s.intern_expr(Expr::Terminal),
+      Self::Error => s.intern_expr(Expr::Error),
       Self::Incomplete => Err(LurkError::Incomplete),
     }
   }
