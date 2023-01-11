@@ -734,20 +734,6 @@ impl<F: LurkField> Store<F> {
     Ok(ptr)
   }
 
-  pub fn insert_scalar(
-    &mut self,
-    scalar: F,
-  ) -> Result<Ptr<F>, LurkError<F>> {
-    Ok(self.insert_expr(Expr::Num(Num::Scalar(scalar)))?)
-  }
-
-  pub fn insert_u64(
-    &mut self,
-    u64: u64,
-  ) -> Result<Ptr<F>, LurkError<F>> {
-    Ok(self.insert_expr(Expr::Num(Num::U64(u64)))?)
-  }
-
   pub fn insert_string(
     &mut self,
     string: String,
@@ -848,30 +834,35 @@ pub mod test {
   fn equality() {
     let store = Store::<Fr>::default();
 
-    let num_ptr1 = store.insert_u64(123).expect("failed to insert u64");
+    let u64_expr = Expr::Num(Num::U64(123));
+
+    let u64_ptr1 = store.insert_expr(u64_expr).expect("failed to insert u64");
     let str_ptr1 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
-    let cons_ptr1 = store.insert_expr(Expr::Cons(num_ptr1, str_ptr1)).expect("failed to insert cons");
-    let num_expr1 = store.get_expr(&num_ptr1).expect("failed to get u64");
+
+    let cons_expr = Expr::Cons(u64_ptr1, str_ptr1);
+
+    let cons_ptr1 = store.insert_expr(cons_expr).expect("failed to insert cons");
+    let u64_expr1 = store.get_expr(&u64_ptr1).expect("failed to get u64");
     let str_expr1 = store.get_expr(&str_ptr1).expect("failed to get str");
     let cons_expr1 = store.get_expr(&cons_ptr1).expect("failed to get cons");
 
-    let num_ptr2 = store.insert_u64(123).expect("failed to insert u64");
+    let u64_ptr2 = store.insert_expr(u64_expr).expect("failed to insert u64");
     let str_ptr2 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
-    let cons_ptr2 = store.insert_expr(Expr::Cons(num_ptr2, str_ptr2)).expect("failed to insert cons");
-    let num_expr2 = store.get_expr(&num_ptr2).expect("failed to get u64");
+    let cons_ptr2 = store.insert_expr(cons_expr).expect("failed to insert cons");
+    let u64_expr2 = store.get_expr(&u64_ptr2).expect("failed to get u64");
     let str_expr2 = store.get_expr(&str_ptr2).expect("failed to get str");
     let cons_expr2 = store.get_expr(&cons_ptr2).expect("failed to get cons");
 
-    assert_eq!(num_ptr1, num_ptr2);
+    assert_eq!(u64_ptr1, u64_ptr2);
     assert_eq!(str_ptr1, str_ptr2);
     assert_eq!(cons_ptr1, cons_ptr2);
 
-    assert_eq!(num_expr1, num_expr2);
+    assert_eq!(u64_expr, u64_expr1);
+    assert_eq!(u64_expr1, u64_expr2);
     assert_eq!(str_expr1, str_expr2);
     assert_eq!(cons_expr1, cons_expr2);
 
-    assert!(matches!(cons_expr1, Expr::Cons(num_ptr1, str_ptr1)));
-    assert!(matches!(cons_expr2, Expr::Cons(num_ptr2, str_ptr2)));
-
+    assert_eq!(cons_expr, cons_expr1);
+    assert_eq!(cons_expr1, cons_expr2);
   }
 }
