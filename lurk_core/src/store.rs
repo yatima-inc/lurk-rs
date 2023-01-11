@@ -596,21 +596,21 @@ impl<F: LurkField> Store<F> {
       Expr::Comm(secret, payload) => {
         self.cache_if_opaque(&secret)?;
         self.cache_if_opaque(&payload)?;
-        let (p, inserted) = self.conses.insert_full((secret, payload));
+        let (p, inserted) = self.comms.insert_full((secret, payload));
         Ok((Ptr::index(ExprTag::Comm, p), inserted))
       },
       Expr::StrNil => Ok((Ptr::null(ExprTag::Str), false)),
       Expr::StrCons(head, tail) => {
         self.cache_if_opaque(&head)?;
         self.cache_if_opaque(&tail)?;
-        let (p, inserted) = self.conses.insert_full((head, tail));
+        let (p, inserted) = self.strs.insert_full((head, tail));
         Ok((Ptr::index(ExprTag::Str, p), inserted))
       },
       Expr::SymNil => Ok((Ptr::null(ExprTag::Sym), false)),
       Expr::SymCons(head, tail) => {
         self.cache_if_opaque(&head)?;
         self.cache_if_opaque(&tail)?;
-        let (p, inserted) = self.conses.insert_full((head, tail));
+        let (p, inserted) = self.syms.insert_full((head, tail));
         Ok((Ptr::index(ExprTag::Sym, p), inserted))
       },
       Expr::Fun(arg, body, env) => {
@@ -717,7 +717,7 @@ impl<F: LurkField> Store<F> {
         self.cache_if_opaque(&body)?;
         self.cache_if_opaque(&env)?;
         self.cache_if_opaque(&cont)?;
-        let (p, inserted) = self.lets.insert_full((var, body, env, cont));
+        let (p, inserted) = self.let_recs.insert_full((var, body, env, cont));
         Ok((Ptr::index(ExprTag::LetRec, p), inserted))
       },
       Expr::Emit(cont) => {
@@ -832,23 +832,23 @@ pub mod test {
 
   #[test]
   fn equality() {
-    let store = Store::<Fr>::default();
+    let mut store = Store::<Fr>::default();
 
     let u64_expr = Expr::Num(Num::U64(123));
 
-    let u64_ptr1 = store.insert_expr(u64_expr).expect("failed to insert u64");
+    let u64_ptr1 = store.insert_expr(u64_expr.clone()).expect("failed to insert u64");
     let str_ptr1 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
 
     let cons_expr = Expr::Cons(u64_ptr1, str_ptr1);
 
-    let cons_ptr1 = store.insert_expr(cons_expr).expect("failed to insert cons");
+    let cons_ptr1 = store.insert_expr(cons_expr.clone()).expect("failed to insert cons");
     let u64_expr1 = store.get_expr(&u64_ptr1).expect("failed to get u64");
     let str_expr1 = store.get_expr(&str_ptr1).expect("failed to get str");
     let cons_expr1 = store.get_expr(&cons_ptr1).expect("failed to get cons");
 
-    let u64_ptr2 = store.insert_expr(u64_expr).expect("failed to insert u64");
+    let u64_ptr2 = store.insert_expr(u64_expr.clone()).expect("failed to insert u64");
     let str_ptr2 = store.insert_string("pumpkin".to_string()).expect("failed to insert str");
-    let cons_ptr2 = store.insert_expr(cons_expr).expect("failed to insert cons");
+    let cons_ptr2 = store.insert_expr(cons_expr.clone()).expect("failed to insert cons");
     let u64_expr2 = store.get_expr(&u64_ptr2).expect("failed to get u64");
     let str_expr2 = store.get_expr(&str_ptr2).expect("failed to get str");
     let cons_expr2 = store.get_expr(&cons_ptr2).expect("failed to get cons");

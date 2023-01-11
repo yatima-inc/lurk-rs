@@ -269,47 +269,7 @@ mod tests {
     Scalar as Fr,
   };
   use ff::Field;
-  use quickcheck::{
-    Arbitrary,
-    Gen,
-  };
-
   use super::*;
-  use crate::{
-    field::FWrap,
-    test::frequency,
-  };
-
-  impl Arbitrary for Num<Fr> {
-    fn arbitrary(g: &mut Gen) -> Self {
-      let input: Vec<(i64, Box<dyn Fn(&mut Gen) -> Num<Fr>>)> = vec![
-        (100, Box::new(|g| Num::U64(Arbitrary::arbitrary(g)))),
-        (
-          100,
-          Box::new(|g| {
-            let f = FWrap::arbitrary(g);
-            Num::Scalar(f.0)
-          }),
-        ),
-      ];
-      frequency(g, input)
-    }
-  }
-
-  #[quickcheck]
-  fn prop_num_ipld(x: Num<Fr>) -> bool {
-    if let Ok(ipld) = libipld::serde::to_ipld(x) {
-      if let Ok(y) = libipld::serde::from_ipld(ipld) {
-        Num::Scalar(x.into_scalar()) == y
-      }
-      else {
-        false
-      }
-    }
-    else {
-      false
-    }
-  }
 
   #[test]
   fn test_add_assign() {

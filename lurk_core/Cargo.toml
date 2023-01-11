@@ -27,6 +27,7 @@ test-utils = ["lurk_ff?/test-utils", "ldon?/test-utils", "dep:rand", "dep:quickc
 
 [dev-dependencies]
 blstrs = "0.6.0"
+ff = "0.12.0"
 lurk_core = { path = ".", features = ["test-utils"] } # enable "test-utils" feature
 ldon = { path = "../ldon", features = ["test-utils"] } # enable "test-utils" feature
 lurk_ff = { path = "../lurk_ff", features = ["test-utils"] }
