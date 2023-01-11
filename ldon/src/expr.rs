@@ -26,6 +26,7 @@ pub enum Expr<F: LurkField> {
   Comm(Cid<F>, Cid<F>),                   // secret, val
   SymNil,                                 //
   SymCons(Cid<F>, Cid<F>),                // head, tail
+  Keyword(Cid<F>),                        // sym
   StrNil,                                 //
   StrCons(Cid<F>, Cid<F>),                // head, tail
   Thunk(Cid<F>, Cid<F>),                  // val, cont
@@ -64,6 +65,7 @@ impl<F: LurkField> Expr<F> {
       Expr::Comm(secret, payload) => vec![*secret, *payload],
       Expr::SymNil => vec![],
       Expr::SymCons(head, tail) => vec![*head, *tail],
+      Expr::Keyword(symbol) => vec![*symbol],
       Expr::Fun(arg, body, closed_env) => vec![*arg, *body, *closed_env],
       Expr::Num(_) => vec![],
       Expr::StrNil => vec![],
@@ -119,6 +121,9 @@ impl<F: LurkField> Expr<F> {
           F::from_tag_unchecked(tail.tag),
           tail.val,
         ]),
+      },
+      Expr::Keyword(symbol) => {
+        Cid { tag: F::expr_tag(ExprTag::Key), val: symbol.val }
       },
       Expr::Fun(arg, body, env) => Cid {
         tag: F::expr_tag(ExprTag::Fun),
@@ -350,6 +355,10 @@ impl<F: LurkField> SerdeF<F> for Expr<F> {
           let cdr = Cid::de_f(&fs[4..])?;
           Ok(Expr::SymCons(car, cdr))
         },
+        ExprTag::Key => {
+          let sym = Cid::de_f(&fs[2..])?;
+          Ok(Expr::Keyword(sym))
+        },
         ExprTag::Comm => {
           let sec = Cid::de_f(&fs[2..])?;
           let val = Cid::de_f(&fs[4..])?;
@@ -488,6 +497,7 @@ pub mod test_utils {
           100,
           Box::new(|g| Self::SymCons(Cid::arbitrary(g), Cid::arbitrary(g))),
         ),
+        (100, Box::new(|g| Self::Keyword(Cid::arbitrary(g)))),
         (100, Box::new(|g| Self::Num(FWrap::arbitrary(g).0))),
         (100, Box::new(|g| Self::Char(FWrap::arbitrary(g).0))),
         (100, Box::new(|g| Self::U64(FWrap::arbitrary(g).0))),

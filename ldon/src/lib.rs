@@ -14,6 +14,7 @@ pub mod op;
 pub mod parser;
 pub mod serde_f;
 pub mod store;
+pub mod sym;
 pub mod syntax;
 #[macro_use]
 pub mod macros;
