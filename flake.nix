@@ -23,7 +23,7 @@
           file = ./rust-toolchain.toml; # alternatively, dir = ./.;
           sha256 = "sha256-/F36bL5WoJ7opVs7o96dwVHE9SEt3am+6N3jPygJRKY=";
           };
-          
+
       in rec {
         defaultPackage = (naersk.lib.${system}.override {
           # For `nix build` & `nix run`:
@@ -32,12 +32,9 @@
         }).buildPackage {
           src = ./.;
         };
-        
-        # For `nix develop` (optional, can be skipped):
+
+        # For `nix develop` or `direnv allow`:
         devShell = pkgs.mkShell {
-          nativeBuildInputs = [
-            toolchain
-          ];
           buildInputs = with pkgs; [
             ocl-icd
           ];
