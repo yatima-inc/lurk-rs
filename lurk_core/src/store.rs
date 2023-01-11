@@ -803,32 +803,6 @@ impl<F: LurkField> Store<F> {
     Ok(ptr)
   }
 
-  pub fn insert_string(
-    &mut self,
-    string: String,
-  ) -> Result<Ptr<F>, LurkError<F>> {
-    todo!()
-    // let mut ptr = self.intern_expr(Expr::StrNil)?;
-    // for c in string.chars().rev() {
-    //  let char_ptr = self.intern_expr(Expr::Char(c))?;
-    //  ptr = self.intern_expr(Expr::StrCons(char_ptr, ptr))?;
-    //}
-    // Ok(ptr)
-  }
-
-  pub fn insert_symbol(
-    &mut self,
-    sym: Vec<String>,
-  ) -> Result<Ptr<F>, LurkError<F>> {
-    todo!()
-    // let mut ptr = self.intern_expr(Expr::SymNil)?;
-    // for s in sym {
-    //  let str_ptr = self.insert_string(s)?;
-    //  ptr = self.intern_expr(Expr::SymCons(str_ptr, ptr))?;
-    //}
-    // Ok(ptr)
-  }
-
   pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
     self.intern_expr(Expr::ConsNil)
   }
