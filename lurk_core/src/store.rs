@@ -18,6 +18,7 @@ use lurk_ff::{
 use rayon::prelude::*;
 
 use crate::{
+  error::LurkError,
   expr::Expr,
   num::Num,
   ptr::{
@@ -98,17 +99,10 @@ impl<F: LurkField> Default for Store<F> {
   }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StoreError<F: LurkField> {
-  ExpectedExpr(Ptr<F>),
-  UnknownPtr(Ptr<F>),
-  UnknownCid(Cid<F>),
-  InvalidOp1Ptr(Ptr<F>, String),
-  InvalidOp2Ptr(Ptr<F>, String),
-  LdonErr(ldon::StoreError<F>),
-  MalformedStore(Ptr<F>),
-  MalformedLdonStore(Cid<F>, ldon::Store<F>),
-  Custom(&'static str),
+#[derive(Clone, Copy, Debug)]
+pub enum HashMode {
+  Put,
+  Get,
 }
 
 impl<F: LurkField> Store<F> {
@@ -122,9 +116,9 @@ impl<F: LurkField> Store<F> {
     &mut self,
     cid: Cid<F>,
     ldon_store: &ldon::Store<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     use ldon::store::Entry;
-    let entry = ldon_store.get_entry(cid).map_err(StoreError::LdonErr)?;
+    let entry = ldon_store.get_entry(cid).map_err(LurkError::LdonStore)?;
     let Cid { tag, val } = cid;
     match (tag.expr, entry) {
       (_, Entry::Opaque) => self.insert_opaque_cid(cid, false),
@@ -161,7 +155,7 @@ impl<F: LurkField> Store<F> {
         self.insert_expr(Expr::Num(Num::Scalar(f)))
       },
       (ExprTag::Char, Entry::Expr(ldon::Expr::Char(..))) => {
-        let c = ldon_store.get_char(cid).map_err(StoreError::LdonErr)?;
+        let c = ldon_store.get_char(cid).map_err(LurkError::LdonStore)?;
         self.insert_expr(Expr::Char(c))
       },
       (ExprTag::Thunk, Entry::Expr(ldon::Expr::Thunk(val, cont))) => {
@@ -256,7 +250,7 @@ impl<F: LurkField> Store<F> {
       (ExprTag::Terminal, Entry::Expr(ldon::Expr::Terminal)) => {
         self.insert_expr(Expr::Terminal)
       },
-      _ => Err(StoreError::MalformedLdonStore(cid, ldon_store.clone())),
+      _ => Err(LurkError::MalformedLdonStore(cid, ldon_store.clone())),
     }
   }
 
@@ -268,7 +262,7 @@ impl<F: LurkField> Store<F> {
     &mut self,
     cid: Cid<F>,
     force: bool,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  ) -> Result<Ptr<F>, LurkError<F>> {
     self.hydrate_cid_cache()?;
     match self.cids.get(&cid) {
       Some(p) if p.is_opaque() || !force => Ok(*p),
@@ -279,10 +273,10 @@ impl<F: LurkField> Store<F> {
     }
   }
 
-  fn get_opaque_cid(&self, cid: Cid<F>) -> Result<Ptr<F>, StoreError<F>> {
+  fn get_opaque_cid(&self, cid: Cid<F>) -> Result<Ptr<F>, LurkError<F>> {
     match self.cids.get(&cid) {
       Some(p) => Ok(*p),
-      None => Err(StoreError::UnknownCid(cid)),
+      None => Err(LurkError::UnknownCid(cid)),
     }
   }
 
@@ -291,187 +285,201 @@ impl<F: LurkField> Store<F> {
     &self,
     ptr: Ptr<F>,
     cid: Cid<F>,
-    cache_mode: bool,
-  ) -> Result<(), StoreError<F>> {
+    cache_mode: HashMode,
+  ) -> Result<(), LurkError<F>> {
     match (cache_mode, self.cids.try_entry(cid)) {
-      (true, Some(entry)) => {
+      (HashMode::Put, Some(entry)) => {
         entry.or_insert(ptr);
         Ok(())
       },
-      (true, None) => {
-        Err(StoreError::Custom("encountered lock when trying to cache a Cid"))
+      (HashMode::Put, None) => {
+        Err(LurkError::Custom("encountered lock when trying to cache a Cid"))
       },
-      (false, _) => Ok(()),
+      (HashMode::Get, _) => Ok(()),
     }
   }
 
-  pub fn get_expr(&self, ptr: &Ptr<F>) -> Result<Expr<F>, StoreError<F>> {
+  pub fn get_expr(&self, ptr: &Ptr<F>) -> Result<Expr<F>, LurkError<F>> {
     match (ptr.tag.expr, ptr.raw) {
       (_, RawPtr::Opaque(idx)) => {
         let cid =
-          self.opaques.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.opaques.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         let ptr = self.get_opaque_cid(*cid)?;
         self.get_expr(&ptr)
       },
       (ExprTag::Cons, RawPtr::Null) => Ok(Expr::ConsNil),
       (ExprTag::Cons, RawPtr::Index(idx)) => {
         let (car, cdr) =
-          self.conses.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.conses.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Cons(*car, *cdr))
       },
       (ExprTag::Comm, RawPtr::Index(idx)) => {
         let (secret, payload) =
-          self.comms.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.comms.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Comm(*secret, *payload))
       },
       (ExprTag::Sym, RawPtr::Null) => Ok(Expr::SymNil),
       (ExprTag::Sym, RawPtr::Index(idx)) => {
         let (head, tail) =
-          self.syms.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.syms.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::SymCons(*head, *tail))
       },
       (ExprTag::Fun, RawPtr::Index(idx)) => {
         let (arg, body, env) =
-          self.funs.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.funs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Fun(*arg, *body, *env))
       },
       (ExprTag::Num, RawPtr::Index(idx)) => {
         let num =
-          self.nums.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.nums.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Num(*num))
       },
       (ExprTag::Str, RawPtr::Null) => Ok(Expr::StrNil),
       (ExprTag::Str, RawPtr::Index(idx)) => {
         let (head, tail) =
-          self.strs.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.strs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::StrCons(*head, *tail))
       },
       (ExprTag::Thunk, RawPtr::Index(idx)) => {
         let (val, cont) =
-          self.thunks.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.thunks.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Thunk(*val, *cont))
       },
       (ExprTag::Char, RawPtr::Index(idx)) => {
         let c =
-          char::from_u32(idx as u32).ok_or(StoreError::UnknownPtr(*ptr))?;
+          char::from_u32(idx as u32).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Char(c))
       },
       (ExprTag::U64, RawPtr::Index(idx)) => Ok(Expr::UInt((idx as u64).into())),
       (ExprTag::Op1, RawPtr::Index(idx)) => {
         let x = u16::try_from(idx)
-          .map_err(|e| StoreError::InvalidOp1Ptr(*ptr, e.to_string()))?;
+          .map_err(|e| LurkError::InvalidOp1Ptr(*ptr, e.to_string()))?;
         Ok(Expr::Op1(
           Op1::try_from(x)
-            .map_err(|e| StoreError::InvalidOp1Ptr(*ptr, e.to_string()))?,
+            .map_err(|e| LurkError::InvalidOp1Ptr(*ptr, e.to_string()))?,
         ))
       },
       (ExprTag::Op2, RawPtr::Index(idx)) => {
         let x = u16::try_from(idx)
-          .map_err(|e| StoreError::InvalidOp2Ptr(*ptr, e.to_string()))?;
+          .map_err(|e| LurkError::InvalidOp2Ptr(*ptr, e.to_string()))?;
         Ok(Expr::Op2(
           Op2::try_from(x)
-            .map_err(|e| StoreError::InvalidOp2Ptr(*ptr, e.to_string()))?,
+            .map_err(|e| LurkError::InvalidOp2Ptr(*ptr, e.to_string()))?,
         ))
       },
       (ExprTag::Outermost, RawPtr::Null) => Ok(Expr::Outermost),
       (ExprTag::Call, RawPtr::Index(idx)) => {
         let (arg, env, cont) =
-          self.calls.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.calls.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Call(*arg, *env, *cont))
       },
       (ExprTag::Call0, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.call0s.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.call0s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Call0(*env, *cont))
       },
       (ExprTag::Call2, RawPtr::Index(idx)) => {
         let (fun, env, cont) =
-          self.call2s.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.call2s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Call2(*fun, *env, *cont))
       },
       (ExprTag::Tail, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.tails.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.tails.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Tail(*env, *cont))
       },
       (ExprTag::Lookup, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.lookups.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.lookups.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Lookup(*env, *cont))
       },
       (ExprTag::Unop, RawPtr::Index(idx)) => {
         let (op, cont) =
-          self.unops.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.unops.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Unop(*op, *cont))
       },
       (ExprTag::Binop, RawPtr::Index(idx)) => {
         let (op, env, args, cont) =
-          self.binops.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.binops.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Binop(*op, *env, *args, *cont))
       },
       (ExprTag::Binop2, RawPtr::Index(idx)) => {
         let (op, arg, cont) =
-          self.binop2s.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.binop2s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Binop2(*op, *arg, *cont))
       },
       (ExprTag::If, RawPtr::Index(idx)) => {
         let (args, cont) =
-          self.ifs.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.ifs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::If(*args, *cont))
       },
       (ExprTag::Let, RawPtr::Index(idx)) => {
         let (var, body, env, cont) =
-          self.lets.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.lets.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Let(*var, *body, *env, *cont))
       },
       (ExprTag::LetRec, RawPtr::Index(idx)) => {
         let (var, body, env, cont) =
-          self.let_recs.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.let_recs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::LetRec(*var, *body, *env, *cont))
       },
       (ExprTag::Emit, RawPtr::Index(idx)) => {
         let cont =
-          self.emits.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?;
+          self.emits.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
         Ok(Expr::Emit(*cont))
       },
       (ExprTag::Error, RawPtr::Null) => Ok(Expr::Error),
       (ExprTag::Terminal, RawPtr::Null) => Ok(Expr::Terminal),
       (ExprTag::Dummy, RawPtr::Null) => Ok(Expr::Dummy),
-      _ => Err(StoreError::UnknownPtr(*ptr)),
+      _ => Err(LurkError::UnknownPtr(*ptr)),
     }
   }
 
-  pub fn hash_expr(
+  pub fn hash_expr(&self, ptr: &Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
+    self.hash_expr_aux(ptr, HashMode::Put)
+  }
+
+  // Get hash for expr, but only if it already exists. This should never cause
+  // create_scalar_ptr to be called. Use this after the cache has been
+  // hydrated. NOTE: because dashmap::entry can deadlock, it is important not to
+  // call hash_expr in nested call graphs which might trigger that behavior.
+  // This discovery is what led to get_expr_hash
+  // TODO: investigate whether dashmap::try_entry fixes this
+  pub fn get_expr_hash(&self, ptr: &Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
+    self.hash_expr_aux(ptr, HashMode::Get)
+  }
+
+  pub fn hash_expr_aux(
     &self,
     ptr: &Ptr<F>,
-    cache_mode: bool,
-  ) -> Result<Cid<F>, StoreError<F>> {
+    cache_mode: HashMode,
+  ) -> Result<Cid<F>, LurkError<F>> {
     let cid = match ptr.raw {
       RawPtr::Opaque(idx) => {
-        Ok(*(self.opaques.get_index(idx).ok_or(StoreError::UnknownPtr(*ptr))?))
+        Ok(*(self.opaques.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?))
       },
       _ => match self.get_expr(ptr)? {
         Expr::ConsNil => Ok(ldon::Expr::ConsNil.cid(&self.poseidon_cache)),
         Expr::Cons(car, cdr) => {
-          let car = self.hash_expr(&car, cache_mode)?;
-          let cdr = self.hash_expr(&cdr, cache_mode)?;
+          let car = self.hash_expr_aux(&car, cache_mode)?;
+          let cdr = self.hash_expr_aux(&cdr, cache_mode)?;
           Ok(ldon::Expr::Cons(car, cdr).cid(&self.poseidon_cache))
         },
         Expr::Comm(secret, payload) => {
-          let secret = self.hash_expr(&secret, cache_mode)?;
-          let payload = self.hash_expr(&payload, cache_mode)?;
+          let secret = self.hash_expr_aux(&secret, cache_mode)?;
+          let payload = self.hash_expr_aux(&payload, cache_mode)?;
           Ok(ldon::Expr::Comm(secret, payload).cid(&self.poseidon_cache))
         },
         Expr::SymNil => Ok(ldon::Expr::SymNil.cid(&self.poseidon_cache)),
         Expr::SymCons(head, tail) => {
-          let head = self.hash_expr(&head, cache_mode)?;
-          let tail = self.hash_expr(&tail, cache_mode)?;
+          let head = self.hash_expr_aux(&head, cache_mode)?;
+          let tail = self.hash_expr_aux(&tail, cache_mode)?;
           Ok(ldon::Expr::SymCons(head, tail).cid(&self.poseidon_cache))
         },
         Expr::Fun(arg, body, env) => {
-          let arg = self.hash_expr(&arg, cache_mode)?;
-          let body = self.hash_expr(&body, cache_mode)?;
-          let env = self.hash_expr(&env, cache_mode)?;
+          let arg = self.hash_expr_aux(&arg, cache_mode)?;
+          let body = self.hash_expr_aux(&body, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
           Ok(ldon::Expr::Fun(arg, body, env).cid(&self.poseidon_cache))
         },
         Expr::Num(num) => {
@@ -480,13 +488,13 @@ impl<F: LurkField> Store<F> {
 
         Expr::StrNil => Ok(ldon::Expr::StrNil.cid(&self.poseidon_cache)),
         Expr::StrCons(head, tail) => {
-          let head = self.hash_expr(&head, cache_mode)?;
-          let tail = self.hash_expr(&tail, cache_mode)?;
+          let head = self.hash_expr_aux(&head, cache_mode)?;
+          let tail = self.hash_expr_aux(&tail, cache_mode)?;
           Ok(ldon::Expr::StrCons(head, tail).cid(&self.poseidon_cache))
         },
         Expr::Thunk(val, cont) => {
-          let val = self.hash_expr(&val, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let val = self.hash_expr_aux(&val, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Thunk(val, cont).cid(&self.poseidon_cache))
         },
         Expr::Char(c) => {
@@ -498,88 +506,85 @@ impl<F: LurkField> Store<F> {
         Expr::Op1(op1) => Ok(ldon::Expr::Op1(op1).cid(&self.poseidon_cache)),
         Expr::Op2(op2) => Ok(ldon::Expr::Op2(op2).cid(&self.poseidon_cache)),
         Expr::Call0(env, cont) => {
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Call0(env, cont).cid(&self.poseidon_cache))
         },
         Expr::Call2(fun, env, cont) => {
-          let fun = self.hash_expr(&fun, cache_mode)?;
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let fun = self.hash_expr_aux(&fun, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Call2(fun, env, cont).cid(&self.poseidon_cache))
         },
         Expr::Tail(env, cont) => {
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Tail(env, cont).cid(&self.poseidon_cache))
         },
         Expr::Lookup(env, cont) => {
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Lookup(env, cont).cid(&self.poseidon_cache))
         },
         Expr::Unop(op, cont) => {
-          let op = self.hash_expr(&op, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let op = self.hash_expr_aux(&op, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Unop(op, cont).cid(&self.poseidon_cache))
         },
         Expr::Binop(op, env, args, cont) => {
-          let op = self.hash_expr(&op, cache_mode)?;
-          let env = self.hash_expr(&env, cache_mode)?;
-          let args = self.hash_expr(&args, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let op = self.hash_expr_aux(&op, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let args = self.hash_expr_aux(&args, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Binop(op, env, args, cont).cid(&self.poseidon_cache))
         },
         Expr::Binop2(op, arg, cont) => {
-          let op = self.hash_expr(&op, cache_mode)?;
-          let arg = self.hash_expr(&arg, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let op = self.hash_expr_aux(&op, cache_mode)?;
+          let arg = self.hash_expr_aux(&arg, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Binop2(op, arg, cont).cid(&self.poseidon_cache))
         },
         Expr::If(args, cont) => {
-          let args = self.hash_expr(&args, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let args = self.hash_expr_aux(&args, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::If(args, cont).cid(&self.poseidon_cache))
         },
         Expr::Let(var, body, env, cont) => {
-          let var = self.hash_expr(&var, cache_mode)?;
-          let body = self.hash_expr(&body, cache_mode)?;
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let var = self.hash_expr_aux(&var, cache_mode)?;
+          let body = self.hash_expr_aux(&body, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::LetRec(var, body, env, cont).cid(&self.poseidon_cache))
         },
         Expr::LetRec(var, body, env, cont) => {
-          let var = self.hash_expr(&var, cache_mode)?;
-          let body = self.hash_expr(&body, cache_mode)?;
-          let env = self.hash_expr(&env, cache_mode)?;
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let var = self.hash_expr_aux(&var, cache_mode)?;
+          let body = self.hash_expr_aux(&body, cache_mode)?;
+          let env = self.hash_expr_aux(&env, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::LetRec(var, body, env, cont).cid(&self.poseidon_cache))
         },
         Expr::Emit(cont) => {
-          let cont = self.hash_expr(&cont, cache_mode)?;
+          let cont = self.hash_expr_aux(&cont, cache_mode)?;
           Ok(ldon::Expr::Emit(cont).cid(&self.poseidon_cache))
         },
         Expr::Error => Ok(ldon::Expr::Error.cid(&self.poseidon_cache)),
         Expr::Dummy => Ok(ldon::Expr::Dummy.cid(&self.poseidon_cache)),
         Expr::Terminal => Ok(ldon::Expr::Terminal.cid(&self.poseidon_cache)),
-        _ => Err(StoreError::MalformedStore(*ptr)),
+        _ => Err(LurkError::MalformedStore(*ptr)),
       },
     }?;
     self.cache_cid(*ptr, cid, cache_mode)?;
     Ok(cid)
   }
 
-  pub fn cache_if_opaque(&mut self, ptr: &Ptr<F>) -> Result<(), StoreError<F>> {
+  pub fn cache_if_opaque(&mut self, ptr: &Ptr<F>) -> Result<(), LurkError<F>> {
     if ptr.is_opaque() {
-      self.hash_expr(ptr, true)?;
+      self.hash_expr(ptr)?;
     }
     Ok(())
   }
 
-  pub fn insert_expr(
-    &mut self,
-    expr: Expr<F>,
-  ) -> Result<Ptr<F>, StoreError<F>> {
+  pub fn insert_expr(&mut self, expr: Expr<F>) -> Result<Ptr<F>, LurkError<F>> {
     let (ptr, inserted) = match expr {
       Expr::ConsNil => Ok((Ptr::null(ExprTag::Cons), false)),
       Expr::Cons(car, cdr) => {
@@ -627,7 +632,7 @@ impl<F: LurkField> Store<F> {
       Expr::UInt(x) => {
         let x: usize = u64::from(x)
           .try_into()
-          .map_err(|_| StoreError::Custom("uint to usize conversion error"))?;
+          .map_err(|_| LurkError::Custom("uint to usize conversion error"))?;
         Ok((Ptr::index(ExprTag::U64, x), false))
       },
       Expr::Thunk(val, cont) => {
@@ -729,13 +734,88 @@ impl<F: LurkField> Store<F> {
     Ok(ptr)
   }
 
+  pub fn insert_string(
+    &mut self,
+    string: String,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    let mut ptr = self.insert_expr(Expr::StrNil)?;
+    for c in string.chars().rev() {
+      let char_ptr = self.insert_expr(Expr::Char(c))?;
+      ptr = self.insert_expr(Expr::StrCons(char_ptr, ptr))?;
+    }
+    Ok(ptr)
+  }
+
+  pub fn insert_symbol(
+    &mut self,
+    sym: Vec<String>,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    let mut ptr = self.insert_expr(Expr::SymNil)?;
+    for s in sym {
+      let str_ptr = self.insert_string(s)?;
+      ptr = self.insert_expr(Expr::SymCons(str_ptr, ptr))?;
+    }
+    Ok(ptr)
+  }
+
+  pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::ConsNil)
+  }
+
+  pub fn cons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::Cons(car, cdr))
+  }
+
+  pub fn strnil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::StrNil)
+  }
+
+  pub fn strcons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::StrCons(car, cdr))
+  }
+
+  pub fn symnil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::SymNil)
+  }
+
+  pub fn symcons(
+    &mut self,
+    car: Ptr<F>,
+    cdr: Ptr<F>,
+  ) -> Result<Ptr<F>, LurkError<F>> {
+    self.insert_expr(Expr::SymCons(car, cdr))
+  }
+
+  pub fn car_cdr(
+    &mut self,
+    ptr: &Ptr<F>,
+  ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
+    match self.get_expr(ptr)? {
+      Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
+      Expr::Cons(car, cdr) => Ok((car, cdr)),
+      Expr::StrNil => Ok((self.strnil()?, self.strnil()?)),
+      Expr::StrCons(car, cdr) => Ok((car, cdr)),
+      Expr::SymNil => Ok((self.strnil()?, self.strnil()?)),
+      Expr::SymCons(car, cdr) => Ok((car, cdr)),
+      _ => Err(LurkError::CantCarCdr(*ptr)),
+    }
+  }
+
   /// Fill the cache for Cid. Only Ptrs which have been inserted since
   /// last hydration will be hashed, so it is safe to call this incrementally.
   /// However, for best proving performance, we should call exactly once so all
   /// hashing can be batched, e.g. on the GPU.
-  pub fn hydrate_cid_cache(&mut self) -> Result<(), StoreError<F>> {
+  pub fn hydrate_cid_cache(&mut self) -> Result<(), LurkError<F>> {
     self.dehydrated.par_iter().try_for_each(|ptr| {
-      self.hash_expr(ptr, true)?;
+      self.hash_expr(ptr)?;
       Ok(())
     })?;
 
