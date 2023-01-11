@@ -51,7 +51,7 @@ macro_rules! sym {
             $(
                 temp_vec.push($x.to_string());
             )*
-            $crate::syntax::Syn::Symbol(Pos::No, temp_vec)
+            $crate::syntax::Syn::Symbol(Pos::No, $crate::sym::Symbol::Sym(temp_vec))
         }
     };
     ($f:ty,  [$( $x:literal ),*] ) => {
@@ -61,7 +61,31 @@ macro_rules! sym {
             $(
                 temp_vec.push($x.to_string());
             )*
-            $crate::syntax::Syn::<$f>::Symbol(Pos::No, temp_vec)
+            $crate::syntax::Syn::<$f>::Symbol(Pos::No, $crate::sym::Symbol::Sym(temp_vec))
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! key {
+    ([$( $x:literal ),*] ) => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::syntax::Syn::Symbol(Pos::No, $crate::sym::Symbol::Key(temp_vec))
+        }
+    };
+    ($f:ty,  [$( $x:literal ),*] ) => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::syntax::Syn::<$f>::Symbol(Pos::No, $crate::sym::Symbol::Key(temp_vec))
         }
     };
 }

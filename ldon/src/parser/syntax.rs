@@ -39,6 +39,8 @@ use crate::{
     string,
     Span,
   },
+  sym,
+  sym::Symbol,
   syntax::Syn,
 };
 pub fn parse_line_comment<F: LurkField>(
@@ -63,34 +65,46 @@ pub fn parse_space1<F: LurkField>(
   Ok((i, com))
 }
 
-pub fn parse_syn_symnil<F: LurkField>(
-) -> impl Fn(Span) -> IResult<Span, Syn<F>, ParseError<Span, F>> {
+pub fn parse_symbol<F: LurkField>(
+) -> impl Fn(Span) -> IResult<Span, Symbol, ParseError<Span, F>> {
   move |from: Span| {
-    let (upto, _) = tag("_.")(from)?;
-    let pos = Pos::from_upto(from, upto);
-    Ok((upto, Syn::Symbol(pos, vec![])))
+    let key_mark = sym::KEYWORD_MARKER;
+    let sym_mark = sym::SYM_MARKER;
+    let sym_sep = sym::SYM_SEPARATOR;
+    let (i, (is_root, mark)) = alt((
+      value((true, key_mark), tag("_:")),
+      value((true, sym_mark), tag("_.")),
+      value((false, sym_mark), char(sym_mark)),
+      value((false, key_mark), char(key_mark)),
+      value((false, sym_mark), peek(none_of(",=(){}[]1234567890"))),
+    ))(from)?;
+    if is_root && mark == key_mark {
+      Ok((i, Symbol::Key(vec![])))
+    }
+    else if is_root && mark == sym_mark {
+      Ok((i, Symbol::Sym(vec![])))
+    }
+    else {
+      let (i, limbs) = separated_list1(
+        char(sym_sep),
+        string::parse_string_inner(sym_sep, false, sym::ESCAPE_CHARS),
+      )(i)?;
+      // println!("limbs {:?}", limbs);
+      if mark == key_mark {
+        Ok((i, Symbol::Key(limbs)))
+      }
+      else {
+        Ok((i, Symbol::Sym(limbs)))
+      }
+    }
   }
 }
-
 pub fn parse_syn_sym<F: LurkField>(
 ) -> impl Fn(Span) -> IResult<Span, Syn<F>, ParseError<Span, F>> {
   move |from: Span| {
-    let (i, root) = alt((
-      char('.'),
-      value(
-        '.',
-        peek(none_of(
-          ",=(){}[]1234567890
-      ",
-        )),
-      ),
-    ))(from)?;
-    let (upto, limbs) = separated_list1(
-      char(root),
-      string::parse_string_inner(root, false, ".,=(){}[]"),
-    )(i)?;
+    let (upto, sym) = parse_symbol()(from)?;
     let pos = Pos::from_upto(from, upto);
-    Ok((upto, Syn::Symbol(pos, limbs)))
+    Ok((upto, Syn::Symbol(pos, sym)))
   }
 }
 
@@ -274,7 +288,6 @@ pub fn parse_syn<F: LurkField>(
       parse_syn_list_improper(),
       parse_syn_link(),
       parse_syn_map(),
-      parse_syn_symnil(),
       parse_syn_sym(),
     ))(from)
   }
@@ -290,6 +303,7 @@ pub mod tests {
   #[allow(unused_imports)]
   use crate::{
     char,
+    key,
     list,
     map,
     num,
@@ -359,6 +373,32 @@ pub mod tests {
   }
 
   #[test]
+  fn unit_parse_keyword() {
+    assert!(test(parse_syn_sym(), "", None));
+    assert!(test(parse_syn(), "_:", Some(key!([]))));
+    assert!(test(parse_syn(), ":", Some(key!([""]))));
+    assert!(test(parse_syn(), ":.", Some(key!(["", ""]))));
+    assert!(test(parse_syn(), ":foo", Some(key!(["foo"]))));
+    assert!(test(parse_syn(), ":.foo", Some(key!(["", "foo"]))));
+    assert!(test(parse_syn(), ":foo.", Some(key!(["foo", ""]))));
+    assert!(test(parse_syn(), ":foo..", Some(key!(["foo", "", ""]))));
+    assert!(test(parse_syn(), ":foo.bar", Some(key!(["foo", "bar"]))));
+    assert!(test(parse_syn(), ":foo?.bar?", Some(key!(["foo?", "bar?"]))));
+    assert!(test(parse_syn(), ":fooλ.barλ", Some(key!(["fooλ", "barλ"]))));
+    assert!(test(
+      parse_syn(),
+      ":foo\\n.bar\\n",
+      Some(key!(["foo\n", "bar\n"]))
+    ));
+    assert!(test(
+      parse_syn(),
+      ":foo\\u{00}.bar\\u{00}",
+      Some(key!(["foo\u{00}", "bar\u{00}"]))
+    ));
+    assert!(test(parse_syn(), ":foo\\.bar", Some(key!(["foo.bar"]))));
+  }
+
+  #[test]
   fn unit_parse_map() {
     assert!(test(parse_syn(), "{}", Some(map!([]))));
     assert!(test(
@@ -368,6 +408,15 @@ pub mod tests {
         (char!('a'), u64!(1)),
         (char!('b'), u64!(2)),
         (char!('c'), u64!(3))
+      ]))
+    ));
+    assert!(test(
+      parse_syn(),
+      "{ :a = 1u64,  :b = 2u64,  :c = 3u64 }",
+      Some(map!([
+        (key!(["a"]), u64!(1)),
+        (key!(["b"]), u64!(2)),
+        (key!(["c"]), u64!(3))
       ]))
     ));
   }
@@ -493,10 +542,10 @@ pub mod tests {
     ));
     assert!(test(
       parse_syn(),
-      "(_., 11242421860377074631u64, .\u{ae}\u{60500}\u{87}..)",
+      "(_:, 11242421860377074631u64, :\u{ae}\u{60500}\u{87}..)",
       Some(list!(
-        [sym!([]), u64!(11242421860377074631)],
-        sym!(["®\u{60500}\u{87}", "", ""])
+        [key!([]), u64!(11242421860377074631)],
+        key!(["®\u{60500}\u{87}", "", ""])
       ))
     ));
   }

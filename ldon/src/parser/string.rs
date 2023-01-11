@@ -104,7 +104,7 @@ pub fn parse_literal<'a, F: LurkField>(
     s.push(delim);
     s.push('\\');
     if !whitespace {
-      for c in crate::syntax::Syn::<F>::whitespace() {
+      for c in crate::sym::Symbol::whitespace() {
         s.push(c);
       }
     }

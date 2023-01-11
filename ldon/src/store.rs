@@ -17,6 +17,7 @@ use crate::{
     SerdeF,
     SerdeFError,
   },
+  sym::Symbol,
   syntax::Syn,
 };
 
@@ -57,6 +58,23 @@ impl<F: LurkField> Store<F> {
     cid
   }
 
+  pub fn insert_symbol(
+    &mut self,
+    cache: &PoseidonCache<F>,
+    sym: &Symbol,
+  ) -> Cid<F> {
+    let path = sym.path();
+    let mut cid = self.insert_expr(cache, Expr::SymNil);
+    for s in path {
+      let str_cid = self.insert_syn(cache, &Syn::String(Pos::No, s.clone()));
+      cid = self.insert_expr(cache, Expr::SymCons(str_cid, cid));
+    }
+    match sym {
+      Symbol::Sym(_) => cid,
+      Symbol::Key(_) => self.insert_expr(cache, Expr::Keyword(cid)),
+    }
+  }
+
   pub fn insert_syn(
     &mut self,
     cache: &PoseidonCache<F>,
@@ -75,15 +93,7 @@ impl<F: LurkField> Store<F> {
         }
         cid
       },
-      Syn::Symbol(_, sym) => {
-        let mut cid = self.insert_expr(cache, Expr::SymNil);
-        for s in sym {
-          let str_cid =
-            self.insert_syn(cache, &Syn::String(Pos::No, s.clone()));
-          cid = self.insert_expr(cache, Expr::SymCons(str_cid, cid));
-        }
-        cid
-      },
+      Syn::Symbol(_, sym) => self.insert_symbol(cache, sym),
       Syn::List(_, xs, end) => {
         if let (Some(end), true) = (end, xs.is_empty()) {
           let nil_cid = self.insert_expr(cache, Expr::ConsNil);
@@ -233,7 +243,10 @@ impl<F: LurkField> Store<F> {
     }
   }
 
-  pub fn get_symbol(&self, cid: Cid<F>) -> Result<Vec<String>, StoreError<F>> {
+  pub fn get_symbol_path(
+    &self,
+    cid: Cid<F>,
+  ) -> Result<Vec<String>, StoreError<F>> {
     let mut list = vec![];
     let mut next = cid;
 
@@ -270,14 +283,19 @@ impl<F: LurkField> Store<F> {
     let expr = self.get_expr(cid)?;
     match expr {
       Expr::ConsNil => Ok(Syn::List(Pos::No, vec![], None)),
-      Expr::SymNil => Ok(Syn::Symbol(Pos::No, vec![])),
+      Expr::SymNil => Ok(Syn::Symbol(Pos::No, Symbol::root_sym())),
       Expr::StrNil => Ok(Syn::String(Pos::No, "".to_string())),
       Expr::Num(f) => Ok(Syn::Num(Pos::No, f)),
       Expr::Char(_) => Ok(Syn::Char(Pos::No, self.get_char(cid)?)),
       Expr::U64(_) => Ok(Syn::U64(Pos::No, self.get_u64(cid)?)),
       Expr::Cons(..) => self.get_syn_list(cid),
       Expr::StrCons(..) => Ok(Syn::String(Pos::No, self.get_string(cid)?)),
-      Expr::SymCons(..) => Ok(Syn::Symbol(Pos::No, self.get_symbol(cid)?)),
+      Expr::SymCons(..) => {
+        Ok(Syn::Symbol(Pos::No, Symbol::Sym(self.get_symbol_path(cid)?)))
+      },
+      Expr::Keyword(sym) => {
+        Ok(Syn::Symbol(Pos::No, Symbol::Key(self.get_symbol_path(sym)?)))
+      },
       Expr::Map(map) => self.get_syn_map(map),
       Expr::Link(ctx, data) => self.get_syn_link(ctx, data),
       _ => Err(StoreError::Custom("no syntax for Comm, Thunk, Fun")),
@@ -457,9 +475,12 @@ mod test {
       vec![Syn::Num(Pos::No, 0u64.into())],
       Some(Box::new(Syn::Num(Pos::No, 0u64.into()))),
     ));
-    test(Syn::Symbol(Pos::No, vec![]));
-    test(Syn::Symbol(Pos::No, vec!["foo".to_string()]));
-    test(Syn::Symbol(Pos::No, vec!["foo".to_string(), "bar".to_string()]));
+    test(Syn::Symbol(Pos::No, Symbol::Sym(vec![])));
+    test(Syn::Symbol(Pos::No, Symbol::Sym(vec!["foo".to_string()])));
+    test(Syn::Symbol(
+      Pos::No,
+      Symbol::Sym(vec!["foo".to_string(), "bar".to_string()]),
+    ));
   }
   #[test]
   fn unit_syn_store_demo() {
@@ -492,10 +513,10 @@ mod test {
     let mut store1 = Store::<Fr>::default();
     let cache = PoseidonCache::default();
     let cid1 = store1.insert_syn(&cache, &syn1);
-    let syn2 = store1.get_syn(cid1).unwrap();
+    let syn2 = store1.get_syn(cid1);
     println!("{:?}", syn1);
     println!("{:?}", syn2);
-    syn1 == syn2
+    syn1 == syn2.unwrap()
   }
 
   #[test]
@@ -534,9 +555,12 @@ mod test {
       vec![Syn::Num(Pos::No, 0u64.into())],
       Some(Box::new(Syn::Num(Pos::No, 0u64.into()))),
     ));
-    test(Syn::Symbol(Pos::No, vec![]));
-    test(Syn::Symbol(Pos::No, vec!["foo".to_string()]));
-    test(Syn::Symbol(Pos::No, vec!["foo".to_string(), "bar".to_string()]));
+    test(Syn::Symbol(Pos::No, Symbol::Sym(vec![])));
+    test(Syn::Symbol(Pos::No, Symbol::Sym(vec!["foo".to_string()])));
+    test(Syn::Symbol(
+      Pos::No,
+      Symbol::Sym(vec!["foo".to_string(), "bar".to_string()]),
+    ));
   }
 
   #[quickcheck]
