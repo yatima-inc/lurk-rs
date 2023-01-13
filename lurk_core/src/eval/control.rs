@@ -65,7 +65,7 @@ impl<F: LurkField> Control<F> {
     };
 
     match cont.tag.expr {
-      ExprTag::Tail => match store.get_expr(&cont)? {
+      ExprTag::Tail => match store.get_expr(cont)? {
         Expr::Tail(saved_env, continuation) => {
           let thunk = store.intern_expr(Expr::Thunk(result, continuation))?;
           let dummy = store.intern_expr(Expr::Dummy)?;
@@ -131,13 +131,13 @@ impl<F: LurkField> Control<F> {
       // Although Emit has no effect within the computation, it has an
       // externally-visible side effect of manifesting an explicit Thunk
       // in the expr register of the execution trace.
-      ExprTag::Emit => match store.get_expr(cont)? {
+      ExprTag::Emit => match store.get_expr(*cont)? {
         Expr::Emit(cont) => Ok(Control::MakeThunk(*result, *env, cont)),
         _ => unreachable!(),
       },
-      ExprTag::Call0 => match store.get_expr(cont)? {
+      ExprTag::Call0 => match store.get_expr(*cont)? {
         Expr::Call0(saved_env, cont) => {
-          match (result.tag.expr, store.get_expr(result)?) {
+          match (result.tag.expr, store.get_expr(*result)?) {
             //(ExprTag::Fun, Expr::Fun(arg, body, closed_env)) => {
             //  if arg == store.lurk_sym("_") {
             //    let (body_form, _) = hash_witness.car_cdr_named(

@@ -2,7 +2,10 @@ use ldon::{
   self,
   Cid,
 };
-use lurk_ff::LurkField;
+use lurk_ff::{
+  ExprTag,
+  LurkField,
+};
 use nova::errors::NovaError;
 
 // use thiserror::Error;
@@ -18,7 +21,9 @@ pub enum LurkError<F: LurkField> {
   Reduce(String),
   // StoreErrors
   ExpectedExpr(Ptr<F>),
-  UnknownPtr(Ptr<F>),
+  GetUnknownPtr(Ptr<F>),
+  GetOpaque(ExprTag, usize),
+  GetIndex(ExprTag, usize),
   CantCarCdr(Ptr<F>),
   UnknownCid(Cid<F>),
   InvalidOp1Ptr(Ptr<F>, String),

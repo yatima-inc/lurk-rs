@@ -275,37 +275,37 @@ mod test {
   #[test]
   fn unit_syn_print() {
     assert!(test_print(sym!([]), "_."));
-    // assert!(test_print(sym!(Fr, []), "_."));
-    // assert!(test_print(key!([]), "_:"));
-    // assert!(test_print(key!(Fr, []), "_:"));
-    // assert!(test_print(sym!([""]), "."));
-    // assert!(test_print(key!([""]), ":"));
-    // assert!(test_print(sym!(["foo"]), "foo"));
-    // assert!(test_print(sym!(["fλoo"]), "fλoo"));
-    // assert!(test_print(sym!(["foo", ""]), "foo."));
-    // assert!(test_print(sym!(["foo", "", ""]), "foo.."));
-    // assert!(test_print(sym!(["", "foo"]), "..foo"));
-    // assert!(test_print(sym!(["", "", "foo"]), "...foo"));
-    // assert!(test_print(key!(["foo"]), ":foo"));
-    // assert!(test_print(key!(["foo", ""]), ":foo."));
-    // assert!(test_print(key!(["foo", "", ""]), ":foo.."));
-    // assert!(test_print(key!(["", "foo"]), ":.foo"));
-    // assert!(test_print(key!(["", "", "foo"]), ":..foo"));
-    // assert!(test_print(list!([]), "()"));
-    // assert!(test_print(list!(Fr, []), "()"));
-    // assert!(test_print(list!([u64!(1), u64!(2), u64!(3)]), "(1u64 2u64
-    // 3u64)")); assert!(test_print(
-    //  list!([u64!(1), u64!(2), u64!(3)], u64!(4)),
-    //  "(1u64, 2u64, 3u64, 4u64)"
-    //));
-    // assert!(test_print(
-    //  map!([
-    //    (sym!(["a"]), u64!(1)),
-    //    (sym!(["b"]), u64!(2)),
-    //    (sym!(["c"]), u64!(3))
-    //  ]),
-    //  "{a = 1u64, b = 2u64, c = 3u64}"
-    //));
+    assert!(test_print(sym!(Fr, []), "_."));
+    assert!(test_print(key!([]), "_:"));
+    assert!(test_print(key!(Fr, []), "_:"));
+    assert!(test_print(sym!([""]), "."));
+    assert!(test_print(key!([""]), ":"));
+    assert!(test_print(sym!(["foo"]), "foo"));
+    assert!(test_print(sym!(["fλoo"]), "fλoo"));
+    assert!(test_print(sym!(["foo", ""]), "foo."));
+    assert!(test_print(sym!(["foo", "", ""]), "foo.."));
+    assert!(test_print(sym!(["", "foo"]), "..foo"));
+    assert!(test_print(sym!(["", "", "foo"]), "...foo"));
+    assert!(test_print(key!(["foo"]), ":foo"));
+    assert!(test_print(key!(["foo", ""]), ":foo."));
+    assert!(test_print(key!(["foo", "", ""]), ":foo.."));
+    assert!(test_print(key!(["", "foo"]), ":.foo"));
+    assert!(test_print(key!(["", "", "foo"]), ":..foo"));
+    assert!(test_print(list!([]), "()"));
+    assert!(test_print(list!(Fr, []), "()"));
+    assert!(test_print(list!([u64!(1), u64!(2), u64!(3)]), "(1u64 2u64 3u64)"));
+    assert!(test_print(
+      list!([u64!(1), u64!(2), u64!(3)], u64!(4)),
+      "(1u64, 2u64, 3u64, 4u64)"
+    ));
+    assert!(test_print(
+      map!([
+        (sym!(["a"]), u64!(1)),
+        (sym!(["b"]), u64!(2)),
+        (sym!(["c"]), u64!(3))
+      ]),
+      "{a = 1u64, b = 2u64, c = 3u64}"
+    ));
   }
 
   #[quickcheck]

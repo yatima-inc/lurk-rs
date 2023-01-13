@@ -37,7 +37,7 @@ impl<F: LurkField> IO<F> {
     store: &Store<F>,
   ) -> Result<Ptr<F>, LurkError<F>> {
     match (self.expr.tag.expr, self.cont.tag.expr) {
-      (ExprTag::Thunk, ExprTag::Dummy) => match store.get_expr(&self.expr)? {
+      (ExprTag::Thunk, ExprTag::Dummy) => match store.get_expr(self.expr)? {
         Expr::Thunk(val, cont) if cont.tag.expr == ExprTag::Emit => Ok(val),
         _ => Err(LurkError::Custom("maybe_emmitted_expression")),
       },
@@ -47,9 +47,9 @@ impl<F: LurkField> IO<F> {
 
   // TODO: Improve errors
   pub fn to_vector(&self, store: &Store<F>) -> Result<Vec<F>, LurkError<F>> {
-    let expr_cid = store.get_expr_hash(&self.expr)?;
-    let env_cid = store.get_expr_hash(&self.env)?;
-    let cont_cid = store.hash_expr(&self.cont)?;
+    let expr_cid = store.get_expr_hash(self.expr)?;
+    let env_cid = store.get_expr_hash(self.env)?;
+    let cont_cid = store.hash_expr(self.cont)?;
     Ok(vec![
       F::from_tag(expr_cid.tag)
         .ok_or(LurkError::Custom("mismatched version and field"))?,

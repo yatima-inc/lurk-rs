@@ -90,12 +90,12 @@ impl<F: LurkField> HashStub<F> {
   pub fn car_cdr(
     &mut self,
     s: &mut Store<F>,
-    cons: &Ptr<F>,
+    cons: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     match self {
       Self::Dummy => {
         let (car, cdr) = Cons::get_car_cdr(s, cons)?;
-        *self = Self::Value(Cons { car, cdr, cons: *cons });
+        *self = Self::Value(Cons { car, cdr, cons });
         Ok((car, cdr))
       },
       Self::Blank => {
@@ -189,7 +189,7 @@ impl<F: LurkField> HashWitness<F> {
     &mut self,
     name: ConsName,
     store: &mut Store<F>,
-    cons: &Ptr<F>,
+    cons: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     self.get_assigned_slot(name).car_cdr(store, cons)
   }
@@ -218,7 +218,7 @@ impl<F: LurkField> HashWitness<F> {
     &mut self,
     name: ConsName,
     store: &mut Store<F>,
-    cons: &Ptr<F>,
+    cons: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     self.get_assigned_slot(name).car_cdr(store, cons)
   }

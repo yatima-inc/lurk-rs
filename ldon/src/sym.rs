@@ -56,6 +56,15 @@ impl Symbol {
     path[l - 1].clone()
   }
 
+  pub fn child(&self, name: String) -> Self {
+    let mut path = self.path().clone();
+    path.push(name);
+    match self {
+      Self::Sym(_) => Self::Sym(path),
+      Self::Key(_) => Self::Key(path),
+    }
+  }
+
   pub fn is_keyword(&self) -> bool { self.path().len() == 2 }
 
   // see https://github.com/sg16-unicode/sg16/issues/69
@@ -107,6 +116,9 @@ impl Symbol {
     }
     res
   }
+
+  // .LURK.NIL
+  // LURK.NIL
 
   pub fn sym_needs_marker(&self) -> bool {
     let xs = self.path();

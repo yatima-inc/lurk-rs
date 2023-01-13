@@ -22,7 +22,9 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Store<F: LurkField>(BTreeMap<Cid<F>, Entry<F>>);
+pub struct Store<F: LurkField> {
+  pub store: BTreeMap<Cid<F>, Entry<F>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<F: LurkField> {
@@ -46,14 +48,21 @@ pub enum StoreError<F: LurkField> {
 impl<F: LurkField> Store<F> {
   pub fn new() -> Self { Self::default() }
 
+  pub fn insert_opaque(&mut self, cid: Cid<F>) -> Cid<F> {
+    if !cid.is_immediate() {
+      self.store.insert(cid, Entry::Opaque);
+    }
+    cid
+  }
+
   pub fn insert_expr(
     &mut self,
     cache: &PoseidonCache<F>,
     expr: Expr<F>,
   ) -> Cid<F> {
     let cid = expr.cid(cache);
-    if cid.immediate().is_none() {
-      self.0.insert(cid, Entry::Expr(expr));
+    if !cid.is_immediate() {
+      self.store.insert(cid, Entry::Expr(expr));
     }
     cid
   }
@@ -147,7 +156,7 @@ impl<F: LurkField> Store<F> {
       Ok(Entry::Expr(expr))
     }
     else {
-      let entry = self.0.get(&cid).ok_or(StoreError::UnknownCid(cid))?;
+      let entry = self.store.get(&cid).ok_or(StoreError::UnknownCid(cid))?;
       Ok(entry.clone())
     }
   }
@@ -309,7 +318,7 @@ impl<F: LurkField> Store<F> {
 impl<F: LurkField> fmt::Display for Store<F> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     writeln!(f, "{{")?;
-    for (k, v) in self.0.iter() {
+    for (k, v) in self.store.iter() {
       match v {
         Entry::Expr(x) => {
           writeln!(f, "  {}: {},", k, x)?;
@@ -328,7 +337,7 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
   fn ser_f(&self) -> Vec<F> {
     let mut exprs = Vec::new();
     let mut opaqs = Vec::new();
-    for (cid, entry) in self.0.iter() {
+    for (cid, entry) in self.store.iter() {
       match entry {
         Entry::Expr(x) => exprs.extend(x.ser_f().into_iter()),
         Entry::Opaque => opaqs.extend(cid.ser_f()),
@@ -365,7 +374,7 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
       map.insert(cid, Entry::Expr(expr));
       i += 2 + expr.child_cids().len() * 2;
     }
-    Ok(Store(map))
+    Ok(Store { store: map })
   }
 }
 #[cfg(feature = "test-utils")]
@@ -391,17 +400,17 @@ pub mod test_utils {
 
   impl Arbitrary for Store<Fr> {
     fn arbitrary(g: &mut Gen) -> Self {
-      let mut map: BTreeMap<Cid<Fr>, Entry<Fr>> = BTreeMap::new();
+      let mut store: BTreeMap<Cid<Fr>, Entry<Fr>> = BTreeMap::new();
       let n: usize = usize::arbitrary(g) % 5;
       let cache = PoseidonCache::default();
       for _ in 0..n {
         let entry = Entry::arbitrary(g);
         match entry {
-          Entry::Opaque => map.insert(Cid::arbitrary(g), entry),
-          Entry::Expr(x) => map.insert(x.cid(&cache), entry),
+          Entry::Opaque => store.insert(Cid::arbitrary(g), entry),
+          Entry::Expr(x) => store.insert(x.cid(&cache), entry),
         };
       }
-      Store(map)
+      Store { store }
     }
   }
 }

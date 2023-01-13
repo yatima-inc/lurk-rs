@@ -32,9 +32,9 @@ impl<F: LurkField> Cons<F> {
 
   pub fn car_cdr(
     &self,
-    cons: &Ptr<F>,
+    cons: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
-    if *cons != self.cons {
+    if cons != self.cons {
       Err(LurkError::Custom("wrong cons"))
     }
     else {
@@ -44,7 +44,7 @@ impl<F: LurkField> Cons<F> {
 
   pub fn get_car_cdr(
     s: &mut Store<F>,
-    cons: &Ptr<F>,
+    cons: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     s.car_cdr(cons)
   }

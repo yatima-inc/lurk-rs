@@ -1,3 +1,8 @@
+use std::{
+  cell::RefCell,
+  rc::Rc,
+};
+
 use ahash::RandomState;
 use dashmap::DashMap;
 use ldon::{
@@ -7,6 +12,8 @@ use ldon::{
     Op1,
     Op2,
   },
+  store::Entry,
+  syntax::Syn,
   PoseidonCache,
 };
 use lurk_ff::{
@@ -16,10 +23,6 @@ use lurk_ff::{
 // use std::fmt;
 // use once_cell::sync::OnceCell;
 use rayon::prelude::*;
-use string_interner::symbol::{
-  Symbol,
-  SymbolUsize,
-};
 
 use crate::{
   error::LurkError,
@@ -29,30 +32,23 @@ use crate::{
     Ptr,
     RawPtr,
   },
+  uint::UInt,
 };
 
 type IndexSet<K> = indexmap::IndexSet<K, RandomState>;
-#[derive(Debug)]
-pub struct StringSet(
-  pub  string_interner::StringInterner<
-    string_interner::backend::BufferBackend<SymbolUsize>,
-    ahash::RandomState,
-  >,
-);
-
-impl Default for StringSet {
-  fn default() -> Self { StringSet(string_interner::StringInterner::new()) }
-}
 
 #[derive(Debug)]
 pub struct Store<F: LurkField> {
   pub conses: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub comms: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub funs: IndexSet<(Ptr<F>, Ptr<F>, Ptr<F>)>,
-  pub syms: StringSet,
+  pub syms: IndexSet<(Ptr<F>, Ptr<F>)>,
+  pub keys: IndexSet<Ptr<F>>,
   // Other sparse storage format without hashing is likely more efficient
   pub nums: IndexSet<Num<F>>,
-  pub strs: StringSet,
+  pub strs: IndexSet<(Ptr<F>, Ptr<F>)>,
+  pub links: IndexSet<(Ptr<F>, Ptr<F>)>,
+  pub maps: IndexSet<Ptr<F>>,
   pub thunks: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub call0s: IndexSet<(Ptr<F>, Ptr<F>)>,
   pub calls: IndexSet<(Ptr<F>, Ptr<F>, Ptr<F>)>,
@@ -87,10 +83,13 @@ impl<F: LurkField> Default for Store<F> {
       conses: Default::default(),
       comms: Default::default(),
       syms: Default::default(),
+      keys: Default::default(),
       nums: Default::default(),
       funs: Default::default(),
       strs: Default::default(),
+      links: Default::default(),
       thunks: Default::default(),
+      maps: Default::default(),
       call0s: Default::default(),
       calls: Default::default(),
       call2s: Default::default(),
@@ -151,21 +150,31 @@ impl<F: LurkField> Store<F> {
         self.intern_expr(Expr::Comm(secret, payload))
       },
       (ExprTag::Sym, Entry::Expr(ldon::Expr::SymNil)) if val == F::zero() => {
-        todo!()
+        self.intern_expr(Expr::SymNil)
       },
       (ExprTag::Sym, Entry::Expr(ldon::Expr::SymCons(car, cdr))) => {
-        todo!()
+        let car = self.intern_cid(car, ldon_store)?;
+        let cdr = self.intern_cid(cdr, ldon_store)?;
+        self.intern_expr(Expr::SymCons(car, cdr))
+      },
+      (ExprTag::Key, Entry::Expr(ldon::Expr::Keyword(sym))) => {
+        let sym = self.intern_cid(sym, ldon_store)?;
+        self.intern_expr(Expr::Keyword(sym))
       },
       (ExprTag::Str, Entry::Expr(ldon::Expr::StrNil)) if val == F::zero() => {
-        self.intern_str("")
+        self.intern_expr(Expr::StrNil)
       },
       (ExprTag::Str, Entry::Expr(ldon::Expr::StrCons(car, cdr))) => {
         let car = self.intern_cid(car, ldon_store)?;
         let cdr = self.intern_cid(cdr, ldon_store)?;
-        self.intern_strcons(car, cdr)
+        self.intern_expr(Expr::StrCons(car, cdr))
       },
       (ExprTag::Num, Entry::Expr(ldon::Expr::Num(f))) => {
         self.intern_expr(Expr::Num(Num::Scalar(f)))
+      },
+      (ExprTag::U64, Entry::Expr(ldon::Expr::U64(..))) => {
+        let x = ldon_store.get_u64(cid).map_err(LurkError::LdonStore)?;
+        self.intern_expr(Expr::UInt(UInt::U64(x)))
       },
       (ExprTag::Char, Entry::Expr(ldon::Expr::Char(..))) => {
         let c = ldon_store.get_char(cid).map_err(LurkError::LdonStore)?;
@@ -175,6 +184,15 @@ impl<F: LurkField> Store<F> {
         let val = self.intern_cid(val, ldon_store)?;
         let cont = self.intern_cid(cont, ldon_store)?;
         self.intern_expr(Expr::Thunk(val, cont))
+      },
+      (ExprTag::Map, Entry::Expr(ldon::Expr::Map(map))) => {
+        let map = self.intern_cid(map, ldon_store)?;
+        self.intern_expr(Expr::Map(map))
+      },
+      (ExprTag::Link, Entry::Expr(ldon::Expr::Link(ctx, data))) => {
+        let ctx = self.intern_cid(ctx, ldon_store)?;
+        let data = self.intern_cid(data, ldon_store)?;
+        self.intern_expr(Expr::Link(ctx, data))
       },
       (ExprTag::Op1, Entry::Expr(ldon::Expr::Op1(op1))) => {
         self.intern_expr(Expr::Op1(op1))
@@ -312,138 +330,160 @@ impl<F: LurkField> Store<F> {
     }
   }
 
-  pub fn get_expr(&self, ptr: &Ptr<F>) -> Result<Expr<F>, LurkError<F>> {
-    match (ptr.tag.expr, ptr.raw) {
+  pub fn get_expr(&self, ptr: Ptr<F>) -> Result<Expr<F>, LurkError<F>> {
+    let tag = ptr.tag.expr;
+    match (tag, ptr.raw) {
       (_, RawPtr::Opaque(idx)) => {
         let cid =
-          self.opaques.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.opaques.get_index(idx).ok_or(LurkError::GetOpaque(tag, idx))?;
         let ptr = self.get_opaque_cid(*cid)?;
-        self.get_expr(&ptr)
+        self.get_expr(ptr)
       },
       (ExprTag::Cons, RawPtr::Null) => Ok(Expr::ConsNil),
       (ExprTag::Cons, RawPtr::Index(idx)) => {
         let (car, cdr) =
-          self.conses.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.conses.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Cons(*car, *cdr))
       },
       (ExprTag::Comm, RawPtr::Index(idx)) => {
         let (secret, payload) =
-          self.comms.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.comms.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Comm(*secret, *payload))
       },
+      (ExprTag::Sym, RawPtr::Null) => Ok(Expr::SymNil),
       (ExprTag::Sym, RawPtr::Index(idx)) => {
-        todo!()
+        let (car, cdr) =
+          self.syms.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
+        Ok(Expr::SymCons(*car, *cdr))
+      },
+      (ExprTag::Key, RawPtr::Index(idx)) => {
+        let sym =
+          self.keys.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
+        Ok(Expr::Keyword(*sym))
       },
       (ExprTag::Fun, RawPtr::Index(idx)) => {
         let (arg, body, env) =
-          self.funs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.funs.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Fun(*arg, *body, *env))
       },
       (ExprTag::Num, RawPtr::Index(idx)) => {
         let num =
-          self.nums.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.nums.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Num(*num))
       },
+      (ExprTag::Str, RawPtr::Null) => Ok(Expr::StrNil),
       (ExprTag::Str, RawPtr::Index(idx)) => {
-        todo!()
+        let (car, cdr) =
+          self.strs.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
+        Ok(Expr::StrCons(*car, *cdr))
       },
       (ExprTag::Thunk, RawPtr::Index(idx)) => {
         let (val, cont) =
-          self.thunks.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.thunks.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Thunk(*val, *cont))
+      },
+      (ExprTag::Map, RawPtr::Index(idx)) => {
+        let map =
+          self.maps.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
+        Ok(Expr::Map(*map))
+      },
+      (ExprTag::Link, RawPtr::Index(idx)) => {
+        let (ctx, data) =
+          self.links.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
+        Ok(Expr::Link(*ctx, *data))
       },
       (ExprTag::Char, RawPtr::Index(idx)) => {
         let c =
-          char::from_u32(idx as u32).ok_or(LurkError::UnknownPtr(*ptr))?;
+          char::from_u32(idx as u32).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Char(c))
       },
       (ExprTag::U64, RawPtr::Index(idx)) => Ok(Expr::UInt((idx as u64).into())),
       (ExprTag::Op1, RawPtr::Index(idx)) => {
         let x = u16::try_from(idx)
-          .map_err(|e| LurkError::InvalidOp1Ptr(*ptr, e.to_string()))?;
+          .map_err(|e| LurkError::InvalidOp1Ptr(ptr, e.to_string()))?;
         Ok(Expr::Op1(
           Op1::try_from(x)
-            .map_err(|e| LurkError::InvalidOp1Ptr(*ptr, e.to_string()))?,
+            .map_err(|e| LurkError::InvalidOp1Ptr(ptr, e.to_string()))?,
         ))
       },
       (ExprTag::Op2, RawPtr::Index(idx)) => {
         let x = u16::try_from(idx)
-          .map_err(|e| LurkError::InvalidOp2Ptr(*ptr, e.to_string()))?;
+          .map_err(|e| LurkError::InvalidOp2Ptr(ptr, e.to_string()))?;
         Ok(Expr::Op2(
           Op2::try_from(x)
-            .map_err(|e| LurkError::InvalidOp2Ptr(*ptr, e.to_string()))?,
+            .map_err(|e| LurkError::InvalidOp2Ptr(ptr, e.to_string()))?,
         ))
       },
       (ExprTag::Outermost, RawPtr::Null) => Ok(Expr::Outermost),
       (ExprTag::Call, RawPtr::Index(idx)) => {
         let (arg, env, cont) =
-          self.calls.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.calls.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Call(*arg, *env, *cont))
       },
       (ExprTag::Call0, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.call0s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.call0s.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Call0(*env, *cont))
       },
       (ExprTag::Call2, RawPtr::Index(idx)) => {
         let (fun, env, cont) =
-          self.call2s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.call2s.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Call2(*fun, *env, *cont))
       },
       (ExprTag::Tail, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.tails.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.tails.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Tail(*env, *cont))
       },
       (ExprTag::Lookup, RawPtr::Index(idx)) => {
         let (env, cont) =
-          self.lookups.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.lookups.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Lookup(*env, *cont))
       },
       (ExprTag::Unop, RawPtr::Index(idx)) => {
         let (op, cont) =
-          self.unops.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.unops.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Unop(*op, *cont))
       },
       (ExprTag::Binop, RawPtr::Index(idx)) => {
         let (op, env, args, cont) =
-          self.binops.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.binops.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Binop(*op, *env, *args, *cont))
       },
       (ExprTag::Binop2, RawPtr::Index(idx)) => {
         let (op, arg, cont) =
-          self.binop2s.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.binop2s.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Binop2(*op, *arg, *cont))
       },
       (ExprTag::If, RawPtr::Index(idx)) => {
         let (args, cont) =
-          self.ifs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.ifs.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::If(*args, *cont))
       },
       (ExprTag::Let, RawPtr::Index(idx)) => {
         let (var, body, env, cont) =
-          self.lets.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.lets.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Let(*var, *body, *env, *cont))
       },
       (ExprTag::LetRec, RawPtr::Index(idx)) => {
         let (var, body, env, cont) =
-          self.let_recs.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.let_recs.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::LetRec(*var, *body, *env, *cont))
       },
       (ExprTag::Emit, RawPtr::Index(idx)) => {
         let cont =
-          self.emits.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?;
+          self.emits.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
         Ok(Expr::Emit(*cont))
       },
       (ExprTag::Error, RawPtr::Null) => Ok(Expr::Error),
       (ExprTag::Terminal, RawPtr::Null) => Ok(Expr::Terminal),
       (ExprTag::Dummy, RawPtr::Null) => Ok(Expr::Dummy),
-      _ => Err(LurkError::UnknownPtr(*ptr)),
+      _ => Err(LurkError::GetUnknownPtr(ptr)),
     }
   }
 
-  pub fn hash_expr(&self, ptr: &Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
-    self.hash_expr_aux(ptr, HashMode::Put)
+  pub fn hash_expr(&self, ptr: Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
+    self.get_entry(ptr, None, HashMode::Put).map(|x| x.0)
   }
 
   // Get hash for expr, but only if it already exists. This should never cause
@@ -452,240 +492,401 @@ impl<F: LurkField> Store<F> {
   // call hash_expr in nested call graphs which might trigger that behavior.
   // This discovery is what led to get_expr_hash
   // TODO: investigate whether dashmap::try_entry fixes this
-  pub fn get_expr_hash(&self, ptr: &Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
-    self.hash_expr_aux(ptr, HashMode::Get)
+  pub fn get_expr_hash(&self, ptr: Ptr<F>) -> Result<Cid<F>, LurkError<F>> {
+    self.get_entry(ptr, None, HashMode::Get).map(|x| x.0)
   }
 
-  pub fn hash_expr_aux(
+  pub fn get_entry(
     &self,
-    ptr: &Ptr<F>,
+    ptr: Ptr<F>,
+    ls: Option<Rc<RefCell<ldon::Store<F>>>>,
     cache_mode: HashMode,
-  ) -> Result<Cid<F>, LurkError<F>> {
-    let cid = match ptr.raw {
+  ) -> Result<(Cid<F>, Entry<F>), LurkError<F>> {
+    match ptr.raw {
       RawPtr::Opaque(idx) => {
-        Ok(*(self.opaques.get_index(idx).ok_or(LurkError::UnknownPtr(*ptr))?))
+        let cid = self
+          .opaques
+          .get_index(idx)
+          .ok_or(LurkError::GetOpaque(ptr.tag.expr, idx))?;
+        match self.cids.get(cid) {
+          // TODO: Double check if this is safe to do. If someone puts a
+          // cid in opaques and then maps the cid to the resulting opaque in
+          // cids this could create cycles
+          Some(ptr) => self.get_entry(*ptr, ls.clone(), cache_mode),
+          None => {
+            self.cache_cid(ptr, *cid, cache_mode)?;
+            if let Some(ls) = ls {
+              ls.borrow_mut().insert_opaque(*cid);
+            };
+            Ok((*cid, Entry::Opaque))
+          },
+        }
       },
-      _ => match self.get_expr(ptr)? {
-        Expr::ConsNil => Ok(ldon::Expr::ConsNil.cid(&self.poseidon_cache)),
-        Expr::Cons(car, cdr) => {
-          let car = self.hash_expr_aux(&car, cache_mode)?;
-          let cdr = self.hash_expr_aux(&cdr, cache_mode)?;
-          Ok(ldon::Expr::Cons(car, cdr).cid(&self.poseidon_cache))
-        },
-        Expr::Comm(secret, payload) => {
-          let secret = self.hash_expr_aux(&secret, cache_mode)?;
-          let payload = self.hash_expr_aux(&payload, cache_mode)?;
-          Ok(ldon::Expr::Comm(secret, payload).cid(&self.poseidon_cache))
-        },
-        Expr::Sym(sym) => {
-          todo!()
-        },
-        Expr::Fun(arg, body, env) => {
-          let arg = self.hash_expr_aux(&arg, cache_mode)?;
-          let body = self.hash_expr_aux(&body, cache_mode)?;
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          Ok(ldon::Expr::Fun(arg, body, env).cid(&self.poseidon_cache))
-        },
-        Expr::Num(num) => {
-          Ok(ldon::Expr::Num(num.into_scalar()).cid(&self.poseidon_cache))
-        },
-        Expr::Str(string) => {
-          todo!()
-        },
-        Expr::Thunk(val, cont) => {
-          let val = self.hash_expr_aux(&val, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Thunk(val, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Char(c) => {
-          Ok(ldon::Expr::Char(F::from_char(c)).cid(&self.poseidon_cache))
-        },
-        Expr::UInt(uint) => Ok(
-          ldon::Expr::U64(F::from_u64(uint.into())).cid(&self.poseidon_cache),
-        ),
-        Expr::Op1(op1) => Ok(ldon::Expr::Op1(op1).cid(&self.poseidon_cache)),
-        Expr::Op2(op2) => Ok(ldon::Expr::Op2(op2).cid(&self.poseidon_cache)),
-        Expr::Call0(env, cont) => {
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Call0(env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Call2(fun, env, cont) => {
-          let fun = self.hash_expr_aux(&fun, cache_mode)?;
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Call2(fun, env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Tail(env, cont) => {
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Tail(env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Lookup(env, cont) => {
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Lookup(env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Unop(op, cont) => {
-          let op = self.hash_expr_aux(&op, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Unop(op, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Binop(op, env, args, cont) => {
-          let op = self.hash_expr_aux(&op, cache_mode)?;
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let args = self.hash_expr_aux(&args, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Binop(op, env, args, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Binop2(op, arg, cont) => {
-          let op = self.hash_expr_aux(&op, cache_mode)?;
-          let arg = self.hash_expr_aux(&arg, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Binop2(op, arg, cont).cid(&self.poseidon_cache))
-        },
-        Expr::If(args, cont) => {
-          let args = self.hash_expr_aux(&args, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::If(args, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Let(var, body, env, cont) => {
-          let var = self.hash_expr_aux(&var, cache_mode)?;
-          let body = self.hash_expr_aux(&body, cache_mode)?;
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::LetRec(var, body, env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::LetRec(var, body, env, cont) => {
-          let var = self.hash_expr_aux(&var, cache_mode)?;
-          let body = self.hash_expr_aux(&body, cache_mode)?;
-          let env = self.hash_expr_aux(&env, cache_mode)?;
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::LetRec(var, body, env, cont).cid(&self.poseidon_cache))
-        },
-        Expr::Emit(cont) => {
-          let cont = self.hash_expr_aux(&cont, cache_mode)?;
-          Ok(ldon::Expr::Emit(cont).cid(&self.poseidon_cache))
-        },
-        Expr::Error => Ok(ldon::Expr::Error.cid(&self.poseidon_cache)),
-        Expr::Dummy => Ok(ldon::Expr::Dummy.cid(&self.poseidon_cache)),
-        Expr::Terminal => Ok(ldon::Expr::Terminal.cid(&self.poseidon_cache)),
-        _ => Err(LurkError::MalformedStore(*ptr)),
+      _ => {
+        let (cid, expr) = match self.get_expr(ptr)? {
+          Expr::ConsNil => {
+            let expr = ldon::Expr::ConsNil;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Cons(car, cdr) => {
+            let (car, _) = self.get_entry(car, ls.clone(), cache_mode)?;
+            let (cdr, _) = self.get_entry(cdr, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Cons(car, cdr);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Comm(secret, payload) => {
+            let (secret, _) = self.get_entry(secret, ls.clone(), cache_mode)?;
+            let (payload, _) =
+              self.get_entry(payload, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Comm(secret, payload);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::SymNil => {
+            let expr = ldon::Expr::SymNil;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::SymCons(car, cdr) => {
+            let (car, _) = self.get_entry(car, ls.clone(), cache_mode)?;
+            let (cdr, _) = self.get_entry(cdr, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::SymCons(car, cdr);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Keyword(sym) => {
+            let (sym, _) = self.get_entry(sym, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Keyword(sym);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Fun(arg, body, env) => {
+            let (arg, _) = self.get_entry(arg, ls.clone(), cache_mode)?;
+            let (body, _) = self.get_entry(body, ls.clone(), cache_mode)?;
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Fun(arg, body, env);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Num(num) => {
+            let expr = ldon::Expr::Num(num.into_scalar());
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::StrNil => {
+            let expr = ldon::Expr::StrNil;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::StrCons(car, cdr) => {
+            let (car, _) = self.get_entry(car, ls.clone(), cache_mode)?;
+            let (cdr, _) = self.get_entry(cdr, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::StrCons(car, cdr);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Map(map) => {
+            let (map, _) = self.get_entry(map, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Map(map);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Link(ctx, data) => {
+            let (ctx, _) = self.get_entry(ctx, ls.clone(), cache_mode)?;
+            let (data, _) = self.get_entry(data, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Link(ctx, data);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Thunk(val, cont) => {
+            let (val, _) = self.get_entry(val, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Thunk(val, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Char(c) => {
+            let expr = ldon::Expr::Char(F::from_char(c));
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::UInt(uint) => {
+            let expr = ldon::Expr::U64(F::from_u64(uint.into()));
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Op1(op1) => {
+            let expr = ldon::Expr::Op1(op1);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Op2(op2) => {
+            let expr = ldon::Expr::Op2(op2);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Call0(env, cont) => {
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Call0(env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Call2(fun, env, cont) => {
+            let (fun, _) = self.get_entry(fun, ls.clone(), cache_mode)?;
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Call2(fun, env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Tail(env, cont) => {
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Tail(env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Lookup(env, cont) => {
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Lookup(env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Unop(op, cont) => {
+            let (op, _) = self.get_entry(op, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Unop(op, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Binop(op, env, args, cont) => {
+            let (op, _) = self.get_entry(op, ls.clone(), cache_mode)?;
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (args, _) = self.get_entry(args, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Binop(op, env, args, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Binop2(op, arg, cont) => {
+            let (op, _) = self.get_entry(op, ls.clone(), cache_mode)?;
+            let (arg, _) = self.get_entry(arg, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Binop2(op, arg, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::If(args, cont) => {
+            let (args, _) = self.get_entry(args, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::If(args, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Let(var, body, env, cont) => {
+            let (var, _) = self.get_entry(var, ls.clone(), cache_mode)?;
+            let (body, _) = self.get_entry(body, ls.clone(), cache_mode)?;
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::LetRec(var, body, env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::LetRec(var, body, env, cont) => {
+            let (var, _) = self.get_entry(var, ls.clone(), cache_mode)?;
+            let (body, _) = self.get_entry(body, ls.clone(), cache_mode)?;
+            let (env, _) = self.get_entry(env, ls.clone(), cache_mode)?;
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::LetRec(var, body, env, cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Emit(cont) => {
+            let (cont, _) = self.get_entry(cont, ls.clone(), cache_mode)?;
+            let expr = ldon::Expr::Emit(cont);
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Error => {
+            let expr = ldon::Expr::Error;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Dummy => {
+            let expr = ldon::Expr::Dummy;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          Expr::Terminal => {
+            let expr = ldon::Expr::Terminal;
+            let cid = expr.cid(&self.poseidon_cache);
+            Ok((cid, expr))
+          },
+          _ => Err(LurkError::MalformedStore(ptr)),
+        }?;
+        self.cache_cid(ptr, cid, cache_mode)?;
+        if let Some(ls) = ls {
+          ls.borrow_mut().insert_expr(&self.poseidon_cache, expr);
+        };
+        Ok((cid, Entry::Expr(expr)))
       },
-    }?;
-    self.cache_cid(*ptr, cid, cache_mode)?;
-    Ok(cid)
+    }
   }
 
-  pub fn cache_if_opaque(&mut self, ptr: &Ptr<F>) -> Result<(), LurkError<F>> {
+  pub fn cache_if_opaque(&mut self, ptr: Ptr<F>) -> Result<(), LurkError<F>> {
     if ptr.is_opaque() {
       self.hash_expr(ptr)?;
     }
     Ok(())
   }
 
-  pub fn intern_strcons(
+  pub fn intern_string(
     &mut self,
-    car: Ptr<F>,
-    cdr: Ptr<F>,
+    string: String,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    self.cache_if_opaque(&car)?;
-    self.cache_if_opaque(&cdr)?;
-    if let (Expr::Char(c), Expr::Str(s)) =
-      (self.get_expr(&car)?, self.get_expr(&cdr)?)
-    {
-      let new_str = format!("{}{}", c, s);
-      self.intern_str(&new_str)
+    let mut ptr = self.intern_expr(Expr::StrNil)?;
+    for c in string.chars().rev() {
+      let char_ptr = self.intern_expr(Expr::Char(c))?;
+      ptr = self.intern_expr(Expr::StrCons(char_ptr, ptr))?;
     }
-    else {
-      Err(LurkError::Custom("strcons args must be Char and Str"))
-    }
+    Ok(ptr)
   }
 
-  pub fn intern_str<T: AsRef<str>>(
+  pub fn intern_symbol(
     &mut self,
-    str: T,
+    sym: Vec<String>,
   ) -> Result<Ptr<F>, LurkError<F>> {
-    // Hash string for side effect. This will cause all tails to be interned.
-    self.hash_string_mut(str.as_ref())?;
-    self.intern_str_aux(str)
+    let mut ptr = self.intern_expr(Expr::SymNil)?;
+    for s in sym {
+      let str_ptr = self.intern_string(s)?;
+      ptr = self.intern_expr(Expr::SymCons(str_ptr, ptr))?;
+    }
+    Ok(ptr)
   }
 
-  pub fn intern_str_aux<T: AsRef<str>>(
-    &mut self,
-    str: T,
-  ) -> Result<Ptr<F>, LurkError<F>> {
-    if let Some(ptr) = self.strs.0.get(&str) {
-      Ok(Ptr::index(ExprTag::Str, ptr.to_usize()))
-    }
-    else {
-      let ptr = self.strs.0.get_or_intern(str);
-      let ptr = Ptr::index(ExprTag::Str, ptr.to_usize());
-      self.dehydrated.push(ptr);
-      Ok(ptr)
-    }
+  pub fn intern_syn(&mut self, syn: &Syn<F>) -> Result<Ptr<F>, LurkError<F>> {
+    let mut ldon_store = ldon::Store::new();
+    let cid = ldon_store.insert_syn(&self.poseidon_cache, syn);
+    self.intern_cid(cid, &ldon_store)
   }
 
-  pub fn hash_string(&self, s: &str) -> Cid<F> {
-    let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
-    for c in s.chars().rev() {
-      let char_cid =
-        Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
-      cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
-    }
-    cid
-  }
+  // pub fn intern_strcons(
+  //  &mut self,
+  //  car: Ptr<F>,
+  //  cdr: Ptr<F>,
+  //) -> Result<Ptr<F>, LurkError<F>> {
+  //  self.cache_if_opaque(&car)?;
+  //  self.cache_if_opaque(&cdr)?;
+  //  if let (Expr::Char(c), Expr::Str(s)) =
+  //    (self.get_expr(&car)?, self.get_expr(&cdr)?)
+  //  {
+  //    let new_str = format!("{}{}", c, s);
+  //    self.intern_str(&new_str)
+  //  }
+  //  else {
+  //    Err(LurkError::Custom("strcons args must be Char and Str"))
+  //  }
+  //}
 
-  pub fn hash_string_mut<T: AsRef<str>>(
-    &mut self,
-    s: T,
-  ) -> Result<Vec<(Ptr<F>, Cid<F>)>, LurkError<F>> {
-    let mut res = Vec::new();
-    let chars: Vec<char> = s.as_ref().chars().rev().collect();
-    let mut i = 0;
-    let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
-    let ptr = self.intern_str_aux("")?;
-    res.push((ptr, cid));
-    for c in &chars {
-      i += 1;
-      let char_cid =
-        Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(*c) };
-      let substring = (&chars)[0..i].iter().collect::<String>();
-      let ptr = self.intern_str_aux(&substring)?;
-      cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
-      self.cache_cid(ptr, cid, HashMode::Put)?;
-      res.push((ptr, cid));
-    }
-    Ok(res)
-  }
+  // pub fn intern_str<T: AsRef<str>>(
+  //  &mut self,
+  //  str: T,
+  //) -> Result<Ptr<F>, LurkError<F>> {
+  //  // Hash string for side effect. This will cause all tails to be interned.
+  //  self.hash_string_mut(str.as_ref())?;
+  //  self.intern_str_aux(str)
+  //}
+
+  // pub fn intern_str_aux<T: AsRef<str>>(
+  //  &mut self,
+  //  str: T,
+  //) -> Result<Ptr<F>, LurkError<F>> {
+  //  if let Some(ptr) = self.strs.0.get(&str) {
+  //    Ok(Ptr::index(ExprTag::Str, ptr.to_usize()))
+  //  }
+  //  else {
+  //    let ptr = self.strs.0.get_or_intern(str);
+  //    let ptr = Ptr::index(ExprTag::Str, ptr.to_usize());
+  //    self.dehydrated.push(ptr);
+  //    Ok(ptr)
+  //  }
+  //}
+
+  // pub fn hash_string(&self, s: &str) -> Cid<F> {
+  //  let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
+  //  for c in s.chars().rev() {
+  //    let char_cid =
+  //      Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(c) };
+  //    cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
+  //  }
+  //  cid
+  //}
+
+  // pub fn hash_string_mut<T: AsRef<str>>(
+  //  &mut self,
+  //  s: T,
+  //) -> Result<Vec<(Ptr<F>, Cid<F>)>, LurkError<F>> {
+  //  let mut res = Vec::new();
+  //  let chars: Vec<char> = s.as_ref().chars().rev().collect();
+  //  let mut i = 0;
+  //  let mut cid = ldon::Expr::StrNil.cid(&self.poseidon_cache);
+  //  let ptr = self.intern_str_aux("")?;
+  //  res.push((ptr, cid));
+  //  for c in &chars {
+  //    i += 1;
+  //    let char_cid =
+  //      Cid { tag: F::expr_tag(ExprTag::Char), val: F::from_char(*c) };
+  //    let substring = (&chars)[0..i].iter().collect::<String>();
+  //    let ptr = self.intern_str_aux(&substring)?;
+  //    cid = ldon::Expr::StrCons(char_cid, cid).cid(&self.poseidon_cache);
+  //    self.cache_cid(ptr, cid, HashMode::Put)?;
+  //    res.push((ptr, cid));
+  //  }
+  //  Ok(res)
+  //}
 
   pub fn intern_expr(&mut self, expr: Expr<F>) -> Result<Ptr<F>, LurkError<F>> {
     let (ptr, inserted) = match expr {
       Expr::ConsNil => Ok((Ptr::null(ExprTag::Cons), false)),
       Expr::Cons(car, cdr) => {
-        self.cache_if_opaque(&car)?;
-        self.cache_if_opaque(&cdr)?;
+        self.cache_if_opaque(car)?;
+        self.cache_if_opaque(cdr)?;
         let (p, inserted) = self.conses.insert_full((car, cdr));
         Ok((Ptr::index(ExprTag::Cons, p), inserted))
       },
       Expr::Comm(secret, payload) => {
-        self.cache_if_opaque(&secret)?;
-        self.cache_if_opaque(&payload)?;
-        let (p, inserted) = self.conses.insert_full((secret, payload));
+        self.cache_if_opaque(secret)?;
+        self.cache_if_opaque(payload)?;
+        let (p, inserted) = self.comms.insert_full((secret, payload));
         Ok((Ptr::index(ExprTag::Comm, p), inserted))
       },
-      // Expr::Str(_) => Ok((Ptr::null(ExprTag::Str), false)),
-      Expr::Str(_) => {
-        todo!()
+      Expr::StrNil => Ok((Ptr::null(ExprTag::Str), false)),
+      Expr::StrCons(car, cdr) => {
+        self.cache_if_opaque(car)?;
+        self.cache_if_opaque(cdr)?;
+        let (p, inserted) = self.strs.insert_full((car, cdr));
+        Ok((Ptr::index(ExprTag::Str, p), inserted))
       },
-      // Expr::SymNil => Ok((Ptr::null(ExprTag::Sym), false)),
-      Expr::Sym(_) => {
-        todo!()
+      Expr::SymNil => Ok((Ptr::null(ExprTag::Sym), false)),
+      Expr::SymCons(car, cdr) => {
+        self.cache_if_opaque(car)?;
+        self.cache_if_opaque(cdr)?;
+        let (p, inserted) = self.syms.insert_full((car, cdr));
+        Ok((Ptr::index(ExprTag::Sym, p), inserted))
+      },
+      Expr::Keyword(sym) => {
+        self.cache_if_opaque(sym)?;
+        let (p, inserted) = self.keys.insert_full(sym);
+        Ok((Ptr::index(ExprTag::Key, p), inserted))
       },
       Expr::Fun(arg, body, env) => {
-        self.cache_if_opaque(&arg)?;
-        self.cache_if_opaque(&body)?;
-        self.cache_if_opaque(&env)?;
+        self.cache_if_opaque(arg)?;
+        self.cache_if_opaque(body)?;
+        self.cache_if_opaque(env)?;
         let (p, inserted) = self.funs.insert_full((arg, body, env));
         Ok((Ptr::index(ExprTag::Fun, p), inserted))
       },
@@ -705,92 +906,103 @@ impl<F: LurkField> Store<F> {
         Ok((Ptr::index(ExprTag::U64, x), false))
       },
       Expr::Thunk(val, cont) => {
-        self.cache_if_opaque(&val)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(val)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.thunks.insert_full((val, cont));
         Ok((Ptr::index(ExprTag::Fun, p), inserted))
+      },
+      Expr::Map(map) => {
+        self.cache_if_opaque(map)?;
+        let (p, inserted) = self.maps.insert_full(map);
+        Ok((Ptr::index(ExprTag::Map, p), inserted))
+      },
+      Expr::Link(ctx, data) => {
+        self.cache_if_opaque(ctx)?;
+        self.cache_if_opaque(data)?;
+        let (p, inserted) = self.links.insert_full((ctx, data));
+        Ok((Ptr::index(ExprTag::Link, p), inserted))
       },
       Expr::Op1(op1) => Ok((Ptr::index(ExprTag::Op1, op1 as usize), false)),
       Expr::Op2(op2) => Ok((Ptr::index(ExprTag::Op1, op2 as usize), false)),
       Expr::Outermost => Ok((Ptr::null(ExprTag::Outermost), false)),
       Expr::Call(arg, env, cont) => {
-        self.cache_if_opaque(&arg)?;
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(arg)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.calls.insert_full((arg, env, cont));
         Ok((Ptr::index(ExprTag::Call, p), inserted))
       },
       Expr::Call0(env, cont) => {
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.call0s.insert_full((env, cont));
         Ok((Ptr::index(ExprTag::Call0, p), inserted))
       },
       Expr::Call2(fun, env, cont) => {
-        self.cache_if_opaque(&fun)?;
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(fun)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.call2s.insert_full((fun, env, cont));
         Ok((Ptr::index(ExprTag::Call2, p), inserted))
       },
       Expr::Tail(env, cont) => {
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.tails.insert_full((env, cont));
         Ok((Ptr::index(ExprTag::Tail, p), inserted))
       },
       Expr::Error => Ok((Ptr::null(ExprTag::Error), false)),
       Expr::Lookup(env, cont) => {
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.lookups.insert_full((env, cont));
         Ok((Ptr::index(ExprTag::Lookup, p), inserted))
       },
       Expr::Unop(op, cont) => {
-        self.cache_if_opaque(&op)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(op)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.unops.insert_full((op, cont));
         Ok((Ptr::index(ExprTag::Unop, p), inserted))
       },
       Expr::Binop(op, env, args, cont) => {
-        self.cache_if_opaque(&op)?;
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&args)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(op)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(args)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.binops.insert_full((op, env, args, cont));
         Ok((Ptr::index(ExprTag::Binop, p), inserted))
       },
       Expr::Binop2(op, arg, cont) => {
-        self.cache_if_opaque(&op)?;
-        self.cache_if_opaque(&arg)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(op)?;
+        self.cache_if_opaque(arg)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.binop2s.insert_full((op, arg, cont));
         Ok((Ptr::index(ExprTag::Binop2, p), inserted))
       },
       Expr::If(args, cont) => {
-        self.cache_if_opaque(&args)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(args)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.ifs.insert_full((args, cont));
         Ok((Ptr::index(ExprTag::If, p), inserted))
       },
       Expr::Let(var, body, env, cont) => {
-        self.cache_if_opaque(&var)?;
-        self.cache_if_opaque(&body)?;
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(var)?;
+        self.cache_if_opaque(body)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.lets.insert_full((var, body, env, cont));
         Ok((Ptr::index(ExprTag::Let, p), inserted))
       },
       Expr::LetRec(var, body, env, cont) => {
-        self.cache_if_opaque(&var)?;
-        self.cache_if_opaque(&body)?;
-        self.cache_if_opaque(&env)?;
-        self.cache_if_opaque(&cont)?;
-        let (p, inserted) = self.lets.insert_full((var, body, env, cont));
+        self.cache_if_opaque(var)?;
+        self.cache_if_opaque(body)?;
+        self.cache_if_opaque(env)?;
+        self.cache_if_opaque(cont)?;
+        let (p, inserted) = self.let_recs.insert_full((var, body, env, cont));
         Ok((Ptr::index(ExprTag::LetRec, p), inserted))
       },
       Expr::Emit(cont) => {
-        self.cache_if_opaque(&cont)?;
+        self.cache_if_opaque(cont)?;
         let (p, inserted) = self.emits.insert_full(cont);
         Ok((Ptr::index(ExprTag::Emit, p), inserted))
       },
@@ -837,7 +1049,7 @@ impl<F: LurkField> Store<F> {
 
   pub fn car_cdr(
     &mut self,
-    ptr: &Ptr<F>,
+    ptr: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     match self.get_expr(ptr)? {
       Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
@@ -847,8 +1059,27 @@ impl<F: LurkField> Store<F> {
       // Expr::StrCons(car, cdr) => Ok((car, cdr)),
       // Expr::SymNil => Ok((self.strnil()?, self.strnil()?)),
       // Expr::SymCons(car, cdr) => Ok((car, cdr)),
-      _ => Err(LurkError::CantCarCdr(*ptr)),
+      _ => Err(LurkError::CantCarCdr(ptr)),
     }
+  }
+
+  pub fn to_ldon_store(
+    &self,
+    root: Ptr<F>,
+  ) -> Result<ldon::Store<F>, LurkError<F>> {
+    let ldon_store = Rc::new(RefCell::new(ldon::Store::new()));
+    self.get_entry(root, Some(ldon_store.clone()), HashMode::Get)?;
+    Ok(ldon_store.as_ref().clone().into_inner())
+  }
+
+  pub fn intern_ldon_store(
+    ldon_store: &ldon::Store<F>,
+  ) -> Result<Store<F>, LurkError<F>> {
+    let mut store = Store::new();
+    for cid in ldon_store.store.keys() {
+      store.intern_cid(*cid, ldon_store)?;
+    }
+    Ok(store)
   }
 
   /// Fill the cache for Cid. Only Ptrs which have been inserted since
@@ -857,7 +1088,7 @@ impl<F: LurkField> Store<F> {
   /// hashing can be batched, e.g. on the GPU.
   pub fn hydrate_cid_cache(&mut self) -> Result<(), LurkError<F>> {
     self.dehydrated.par_iter().try_for_each(|ptr| {
-      self.hash_expr(ptr)?;
+      self.hash_expr(*ptr)?;
       Ok(())
     })?;
 
@@ -872,4 +1103,119 @@ impl<F: LurkField> Store<F> {
   //    self.nil()
   //  }
   //}
+}
+
+#[cfg(test)]
+pub mod test {
+
+  use blstrs::Scalar as Fr;
+  use ldon::{
+    parser::position::Pos,
+    syntax::Syn,
+  };
+
+  use super::*;
+
+  #[test]
+  fn unit_intern_syn() {
+    let mut store = Store::<Fr>::default();
+
+    let syn = Syn::<Fr>::U64(Pos::No, 1u64);
+
+    let ptr = store.intern_syn(&syn);
+    println!("ptr {:?}", ptr);
+    assert!(ptr.is_ok())
+  }
+
+  #[quickcheck]
+  fn prop_intern_syn(syn1: Syn<Fr>) -> bool {
+    let mut store1 = Store::<Fr>::default();
+    store1.intern_syn(&syn1).expect("failed to intern syn");
+    true
+  }
+
+  #[test]
+  fn unit_intern_equality() {
+    let mut store = Store::<Fr>::default();
+
+    let u64_expr = Expr::Num(Num::U64(123));
+
+    let u64_ptr1 = store.intern_expr(u64_expr.clone()).unwrap();
+    let str_ptr1 = store.intern_string("pumpkin".to_string()).unwrap();
+
+    let cons_expr = Expr::Cons(u64_ptr1, str_ptr1);
+
+    let cons_ptr1 = store.intern_expr(cons_expr.clone()).unwrap();
+    let u64_expr1 = store.get_expr(u64_ptr1).unwrap();
+    let str_expr1 = store.get_expr(str_ptr1).unwrap();
+    let cons_expr1 = store.get_expr(cons_ptr1).unwrap();
+
+    let u64_ptr2 = store.intern_expr(u64_expr.clone()).unwrap();
+    let str_ptr2 = store.intern_string("pumpkin".to_string()).unwrap();
+    let cons_ptr2 = store.intern_expr(cons_expr.clone()).unwrap();
+    let u64_expr2 = store.get_expr(u64_ptr2).unwrap();
+    let str_expr2 = store.get_expr(str_ptr2).unwrap();
+    let cons_expr2 = store.get_expr(cons_ptr2).unwrap();
+
+    assert_eq!(u64_ptr1, u64_ptr2);
+    assert_eq!(str_ptr1, str_ptr2);
+    assert_eq!(cons_ptr1, cons_ptr2);
+
+    assert_eq!(u64_expr, u64_expr1);
+    assert_eq!(u64_expr1, u64_expr2);
+    assert_eq!(str_expr1, str_expr2);
+    assert_eq!(cons_expr1, cons_expr2);
+
+    assert_eq!(cons_expr, cons_expr1);
+    assert_eq!(cons_expr1, cons_expr2);
+  }
+
+  #[quickcheck]
+  fn prop_intern_syn_ptr_equality(syn1: Syn<Fr>) -> bool {
+    let mut store1 = Store::<Fr>::default();
+    let ptr1 = store1.intern_syn(&syn1).expect("failed to intern syn");
+    let ptr2 = store1.intern_syn(&syn1).expect("failed to intern syn");
+    ptr1 == ptr2
+  }
+
+  #[quickcheck]
+  fn prop_intern_syn_ptr_equality2(syns: (Syn<Fr>, Syn<Fr>)) -> bool {
+    let (syn1, syn2) = syns;
+    let mut store1 = Store::<Fr>::default();
+    let syn1_ptr1 = store1.intern_syn(&syn1).expect("failed to intern syn");
+    let syn2_ptr1 = store1.intern_syn(&syn2).expect("failed to intern syn");
+    let syn1_ptr2 = store1.intern_syn(&syn1).expect("failed to intern syn");
+    let syn2_ptr2 = store1.intern_syn(&syn2).expect("failed to intern syn");
+    syn1_ptr1 == syn1_ptr2 && syn2_ptr1 == syn2_ptr2
+  }
+
+  #[quickcheck]
+  fn prop_intern_ldon_store_consistency(syn1: Syn<Fr>) -> bool {
+    let mut store1 = Store::new();
+    let mut ldon_store1 = ldon::Store::<Fr>::default();
+    let cid1 = ldon_store1.insert_syn(&store1.poseidon_cache, &syn1);
+    let mut store1 = Store::<Fr>::intern_ldon_store(&ldon_store1)
+      .expect("failed to intern ldon store");
+    let ptr1 =
+      store1.intern_cid(cid1, &ldon_store1).expect("failed to intern cid");
+    let ldon_store2 =
+      store1.to_ldon_store(ptr1).expect("failed to make ldon_store");
+    let cid2 = store1.hash_expr(ptr1).expect("failed to hash ptr");
+
+    ldon_store1 == ldon_store2 && cid1 == cid2
+  }
+
+  #[quickcheck]
+  fn prop_cid_consistency(syn1: Syn<Fr>) -> bool {
+    let mut ldon_store = ldon::Store::<Fr>::default();
+    let mut store = Store::<Fr>::default();
+    println!("syn1 {}", syn1);
+    let cid1 = ldon_store.insert_syn(&store.poseidon_cache, &syn1);
+    println!("cid1 {}", cid1);
+    let ptr1 =
+      store.intern_cid(cid1, &ldon_store).expect("failed to intern cid");
+    println!("ptr1 {:?}", ptr1);
+    let cid2 = store.hash_expr(ptr1).expect("failed to hash expr");
+    cid1 == cid2
+  }
 }

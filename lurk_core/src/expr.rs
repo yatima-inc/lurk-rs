@@ -14,19 +14,24 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Expr<'a, F: LurkField> {
+pub enum Expr<F: LurkField> {
   ConsNil,              //
   Cons(Ptr<F>, Ptr<F>), // car, cdr
   Comm(Ptr<F>, Ptr<F>), // secret, payload
-  Sym(Symbol),
+  SymNil,
+  SymCons(Ptr<F>, Ptr<F>),
+  Keyword(Ptr<F>),
   Fun(Ptr<F>, Ptr<F>, Ptr<F>), // arg, body, env
   Num(Num<F>),                 //
-  Str(&'a str),
+  StrNil,
+  StrCons(Ptr<F>, Ptr<F>),
   Thunk(Ptr<F>, Ptr<F>),                  // val, cont
   Char(char),                             //
   UInt(UInt),                             //
   Op1(Op1),                               //
   Op2(Op2),                               //
+  Map(Ptr<F>),                            // assoc-list
+  Link(Ptr<F>, Ptr<F>),                   // ctx, data
   Outermost,                              //
   Call(Ptr<F>, Ptr<F>, Ptr<F>),           // arg, env, cont
   Call0(Ptr<F>, Ptr<F>),                  // env, cont

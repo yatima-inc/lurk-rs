@@ -11,6 +11,7 @@ pub mod cid;
 pub mod expr;
 pub mod hash;
 pub mod op;
+// pub mod package;
 pub mod parser;
 pub mod serde_f;
 pub mod store;

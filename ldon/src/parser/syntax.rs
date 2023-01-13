@@ -74,8 +74,11 @@ pub fn parse_symbol<F: LurkField>(
     let (i, (is_root, mark)) = alt((
       value((true, key_mark), tag("_:")),
       value((true, sym_mark), tag("_.")),
+      // .foo
       value((false, sym_mark), char(sym_mark)),
+      // :foo
       value((false, key_mark), char(key_mark)),
+      // foo
       value((false, sym_mark), peek(none_of(",=(){}[]1234567890"))),
     ))(from)?;
     if is_root && mark == key_mark {
@@ -512,6 +515,10 @@ pub mod tests {
     ));
   }
 
+  // (1 2)
+  // Cons(Num(1), Num(2))
+  // (.1 .2)
+  // Cons(Sym(vec!["1"]), Sym(vec!["2"]))
   #[test]
   fn unit_parse_syn_misc() {
     let vec: Vec<u8> = vec![
