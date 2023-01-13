@@ -1,50 +1,44 @@
 {
   inputs = {
+    nixpkgs.url = "nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    naersk.url = "github:nix-community/naersk";
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
   };
 
-  outputs = { self, fenix, flake-utils, naersk, nixpkgs }:
+  outputs = { self, nixpkgs, flake-utils, naersk, fenix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = (import nixpkgs) {
           inherit system;
         };
-        target = "aarch64-unknown-linux-gnu";
 
-        toolchain = with fenix.packages.${system}; toolchainOf {
-          channel = "nightly";
-          date = "2023-01-08";
-          sha256 = "sha256-/F36bL5WoJ7opVs7o96dwVHE9SEt3am+6N3jPygJRKY=";
-        };
-          dev-toolchain = toolchain.withComponents [
-            "cargo" "rustc" "rust-src" "rustfmt" "clippy"
-          ];
+        toolchain = with fenix.packages.${system}; fromToolchainFile {
+          file = ./rust-toolchain.toml; # alternatively, dir = ./.;
+          sha256 = "sha256-8t+lcqQLG8xQfN/ygZnrQXON3OI5AmuQ1o8ofIB5RuA=";
+          };
 
       in rec {
-        # For `nix build` & `nix run`:
         defaultPackage = (naersk.lib.${system}.override {
-          cargo = toolchain.rust;
-          rustc = toolchain.rust;
+          # For `nix build` & `nix run`:
+          cargo = toolchain;
+          rustc = toolchain;
         }).buildPackage {
           src = ./.;
-          CARGO_BUILD_TARGET = target;
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER =
-            "${pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc}/bin/${target}-gcc";
         };
 
-        # For `nix develop` (optional, can be skipped):
+        # For `nix develop` or `direnv allow`:
         devShell = pkgs.mkShell {
-          nativeBuildInputs = [
-            dev-toolchain
-            toolchain.rust-analyzer
+          buildInputs = with pkgs; [
+            ocl-icd
+            toolchain
           ];
-          #RUST_SRC_PATH = "${toolchain.rust-src}/lib/rustlib/src/rust/library";
         };
       }
     );
