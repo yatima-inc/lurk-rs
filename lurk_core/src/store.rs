@@ -1170,6 +1170,7 @@ pub mod test {
     assert_eq!(cons_expr1, cons_expr2);
   }
 
+  #[test]
   fn unit_intern_inequality() {
     let mut store = Store::<Fr>::default();
 
@@ -1200,6 +1201,24 @@ pub mod test {
     let syn1_ptr2 = store1.intern_syn(&syn1).expect("failed to intern syn");
     let syn2_ptr2 = store1.intern_syn(&syn2).expect("failed to intern syn");
     syn1_ptr1 == syn1_ptr2 && syn2_ptr1 == syn2_ptr2
+  }
+
+  #[quickcheck]
+  fn prop_intern_syn_ptr_inequality(syns: (Syn<Fr>, Syn<Fr>)) -> bool {
+    let (syn1, syn2) = syns;
+    let mut store1 = Store::<Fr>::default();
+    let syn1_ptr = store1.intern_syn(&syn1).expect("failed to intern syn");
+    let syn2_ptr = store1.intern_syn(&syn2).expect("failed to intern syn");
+    if syn1 == syn2 {
+      syn1_ptr == syn2_ptr
+    }
+    else {
+      // println!("syn1 {}", syn1);
+      // println!("ptr1 {:?}", syn1_ptr);
+      // println!("syn2 {}", syn2);
+      // println!("ptr2 {:?}", syn2_ptr);
+      syn1_ptr != syn2_ptr
+    }
   }
 
   #[quickcheck]
