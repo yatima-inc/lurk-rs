@@ -1170,6 +1170,19 @@ pub mod test {
     assert_eq!(cons_expr1, cons_expr2);
   }
 
+  fn unit_intern_inequality() {
+    let mut store = Store::<Fr>::default();
+
+    let u64_ptr1 = store.intern_expr(Expr::Num(Num::U64(123))).unwrap();
+    let str_ptr1 = store.intern_string("pumpkin".to_string()).unwrap();
+
+    let u64_ptr2 = store.intern_expr(Expr::Num(Num::U64(1234))).unwrap();
+    let str_ptr2 = store.intern_string("pumpkins".to_string()).unwrap();
+
+    assert_ne!(u64_ptr1, u64_ptr2);
+    assert_ne!(str_ptr1, str_ptr2);
+  }
+
   #[quickcheck]
   fn prop_intern_syn_ptr_equality(syn1: Syn<Fr>) -> bool {
     let mut store1 = Store::<Fr>::default();
