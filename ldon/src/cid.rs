@@ -47,7 +47,6 @@ impl<F: LurkField> Cid<F> {
       ExprTag::Char => Some(Expr::Char(self.val)),
       ExprTag::U64 => Some(Expr::U64(self.val)),
       ExprTag::Str if self.val == F::zero() => Some(Expr::StrNil),
-      ExprTag::Cons if self.val == F::zero() => Some(Expr::ConsNil),
       ExprTag::Sym if self.val == F::zero() => Some(Expr::SymNil),
       ExprTag::Outermost => Some(Expr::Outermost),
       ExprTag::Error => Some(Expr::Error),
@@ -121,7 +120,17 @@ impl<F: LurkField> Ord for Cid<F> {
 impl<F: LurkField> fmt::Display for Cid<F> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.tag.expr)?;
-    write!(f, "{}", self.val.hex_digits())
+    match self.tag.expr {
+      ExprTag::Char => {
+        if let Some(c) = F::to_char(&self.val) {
+          write!(f, "{}", c)
+        }
+        else {
+          write!(f, "{}", self.val.hex_digits())
+        }
+      },
+      _ => write!(f, "{}", self.val.hex_digits()),
+    }
   }
 }
 

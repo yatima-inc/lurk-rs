@@ -29,6 +29,7 @@ use nom::{
 };
 
 use crate::{
+  lurksym,
   parser::{
     base,
     error::{
@@ -203,16 +204,10 @@ pub fn parse_syn_list_improper<F: LurkField>(
         xs.extend(end_xs);
         end_end
       },
-      x => Some(Box::new(x)),
+      x => Box::new(x),
     };
     let pos = Pos::from_upto(from, upto);
-    // improper lists require at least 2 elements, if this parser gets called
-    // on a list of 1 element, return a proper list instead
-    match (end, xs.is_empty()) {
-      (Some(end), true) => Ok((upto, Syn::List(pos, vec![*end], None))),
-      (None, true) => Ok((upto, Syn::List(pos, vec![], None))),
-      (end, false) => Ok((upto, Syn::List(pos, xs, end))),
-    }
+    Ok((upto, Syn::List(pos, xs, end)))
   }
 }
 
@@ -225,7 +220,13 @@ pub fn parse_syn_list_proper<F: LurkField>(
     // println!("list xs {:?}", xs);
     let (upto, _) = tag(")")(i)?;
     let pos = Pos::from_upto(from, upto);
-    Ok((upto, Syn::List(pos, xs, None)))
+    let nil = Syn::Symbol(pos, lurksym!["nil"]);
+    if xs.is_empty() {
+      Ok((upto, nil))
+    }
+    else {
+      Ok((upto, Syn::List(pos, xs, Box::new(nil))))
+    }
   }
 }
 
@@ -306,12 +307,12 @@ pub mod tests {
   #[allow(unused_imports)]
   use crate::{
     char,
-    key,
+    keyword,
     list,
     map,
     num,
     str,
-    sym,
+    symbol,
     u64,
   };
 
@@ -350,55 +351,55 @@ pub mod tests {
   #[test]
   fn unit_parse_symbol() {
     assert!(test(parse_syn_sym(), "", None));
-    assert!(test(parse_syn(), "_.", Some(sym!([]))));
-    assert!(test(parse_syn(), ".", Some(sym!([""]))));
-    assert!(test(parse_syn(), "..", Some(sym!(["", ""]))));
-    assert!(test(parse_syn(), "foo", Some(sym!(["foo"]))));
-    assert!(test(parse_syn(), ".foo", Some(sym!(["foo"]))));
-    assert!(test(parse_syn(), "..foo", Some(sym!(["", "foo"]))));
-    assert!(test(parse_syn(), "foo.", Some(sym!(["foo", ""]))));
-    assert!(test(parse_syn(), ".foo.", Some(sym!(["foo", ""]))));
-    assert!(test(parse_syn(), ".foo..", Some(sym!(["foo", "", ""]))));
-    assert!(test(parse_syn(), ".foo.bar", Some(sym!(["foo", "bar"]))));
-    assert!(test(parse_syn(), ".foo?.bar?", Some(sym!(["foo?", "bar?"]))));
-    assert!(test(parse_syn(), ".fooλ.barλ", Some(sym!(["fooλ", "barλ"]))));
+    assert!(test(parse_syn(), "_.", Some(symbol!([]))));
+    assert!(test(parse_syn(), ".", Some(symbol!([""]))));
+    assert!(test(parse_syn(), "..", Some(symbol!(["", ""]))));
+    assert!(test(parse_syn(), "foo", Some(symbol!(["foo"]))));
+    assert!(test(parse_syn(), ".foo", Some(symbol!(["foo"]))));
+    assert!(test(parse_syn(), "..foo", Some(symbol!(["", "foo"]))));
+    assert!(test(parse_syn(), "foo.", Some(symbol!(["foo", ""]))));
+    assert!(test(parse_syn(), ".foo.", Some(symbol!(["foo", ""]))));
+    assert!(test(parse_syn(), ".foo..", Some(symbol!(["foo", "", ""]))));
+    assert!(test(parse_syn(), ".foo.bar", Some(symbol!(["foo", "bar"]))));
+    assert!(test(parse_syn(), ".foo?.bar?", Some(symbol!(["foo?", "bar?"]))));
+    assert!(test(parse_syn(), ".fooλ.barλ", Some(symbol!(["fooλ", "barλ"]))));
     assert!(test(
       parse_syn(),
       ".foo\\n.bar\\n",
-      Some(sym!(["foo\n", "bar\n"]))
+      Some(symbol!(["foo\n", "bar\n"]))
     ));
     assert!(test(
       parse_syn(),
       ".foo\\u{00}.bar\\u{00}",
-      Some(sym!(["foo\u{00}", "bar\u{00}"]))
+      Some(symbol!(["foo\u{00}", "bar\u{00}"]))
     ));
-    assert!(test(parse_syn(), ".foo\\.bar", Some(sym!(["foo.bar"]))));
+    assert!(test(parse_syn(), ".foo\\.bar", Some(symbol!(["foo.bar"]))));
   }
 
   #[test]
   fn unit_parse_keyword() {
     assert!(test(parse_syn_sym(), "", None));
-    assert!(test(parse_syn(), "_:", Some(key!([]))));
-    assert!(test(parse_syn(), ":", Some(key!([""]))));
-    assert!(test(parse_syn(), ":.", Some(key!(["", ""]))));
-    assert!(test(parse_syn(), ":foo", Some(key!(["foo"]))));
-    assert!(test(parse_syn(), ":.foo", Some(key!(["", "foo"]))));
-    assert!(test(parse_syn(), ":foo.", Some(key!(["foo", ""]))));
-    assert!(test(parse_syn(), ":foo..", Some(key!(["foo", "", ""]))));
-    assert!(test(parse_syn(), ":foo.bar", Some(key!(["foo", "bar"]))));
-    assert!(test(parse_syn(), ":foo?.bar?", Some(key!(["foo?", "bar?"]))));
-    assert!(test(parse_syn(), ":fooλ.barλ", Some(key!(["fooλ", "barλ"]))));
+    assert!(test(parse_syn(), "_:", Some(keyword!([]))));
+    assert!(test(parse_syn(), ":", Some(keyword!([""]))));
+    assert!(test(parse_syn(), ":.", Some(keyword!(["", ""]))));
+    assert!(test(parse_syn(), ":foo", Some(keyword!(["foo"]))));
+    assert!(test(parse_syn(), ":.foo", Some(keyword!(["", "foo"]))));
+    assert!(test(parse_syn(), ":foo.", Some(keyword!(["foo", ""]))));
+    assert!(test(parse_syn(), ":foo..", Some(keyword!(["foo", "", ""]))));
+    assert!(test(parse_syn(), ":foo.bar", Some(keyword!(["foo", "bar"]))));
+    assert!(test(parse_syn(), ":foo?.bar?", Some(keyword!(["foo?", "bar?"]))));
+    assert!(test(parse_syn(), ":fooλ.barλ", Some(keyword!(["fooλ", "barλ"]))));
     assert!(test(
       parse_syn(),
       ":foo\\n.bar\\n",
-      Some(key!(["foo\n", "bar\n"]))
+      Some(keyword!(["foo\n", "bar\n"]))
     ));
     assert!(test(
       parse_syn(),
       ":foo\\u{00}.bar\\u{00}",
-      Some(key!(["foo\u{00}", "bar\u{00}"]))
+      Some(keyword!(["foo\u{00}", "bar\u{00}"]))
     ));
-    assert!(test(parse_syn(), ":foo\\.bar", Some(key!(["foo.bar"]))));
+    assert!(test(parse_syn(), ":foo\\.bar", Some(keyword!(["foo.bar"]))));
   }
 
   #[test]
@@ -417,55 +418,55 @@ pub mod tests {
       parse_syn(),
       "{ :a = 1u64,  :b = 2u64,  :c = 3u64 }",
       Some(map!([
-        (key!(["a"]), u64!(1)),
-        (key!(["b"]), u64!(2)),
-        (key!(["c"]), u64!(3))
+        (keyword!(["a"]), u64!(1)),
+        (keyword!(["b"]), u64!(2)),
+        (keyword!(["c"]), u64!(3))
       ]))
     ));
   }
 
   #[test]
   fn unit_parse_list() {
-    assert!(test(parse_syn(), "()", Some(list!([])),));
+    assert!(test(parse_syn(), "()", Some(symbol!(["lurk", "nil"]))));
     assert!(test(
       parse_syn(),
       "(a b)",
-      Some(list!([sym!(["a"]), sym!(["b"])])),
+      Some(list!([symbol!(["a"]), symbol!(["b"])])),
     ));
     assert!(test(
       parse_syn(),
       "(.a .b)",
-      Some(list!([sym!(["a"]), sym!(["b"])])),
+      Some(list!([symbol!(["a"]), symbol!(["b"])])),
     ));
     assert!(test(
       parse_syn(),
       "(.LURK.LAMBDA .LURK.LAMBDA)",
-      Some(list!([sym!(["LURK", "LAMBDA"]), sym!(["LURK", "LAMBDA"])])),
+      Some(list!([symbol!(["LURK", "LAMBDA"]), symbol!(["LURK", "LAMBDA"])])),
     ));
     assert!(test(
       parse_syn(),
       "(a, b)",
-      Some(list!([sym!(["a"])], sym!(["b"]))),
+      Some(list!([symbol!(["a"])], symbol!(["b"]))),
     ));
     assert!(test(
       parse_syn(),
       "(.a, .b)",
-      Some(list!([sym!(["a"])], sym!(["b"]))),
+      Some(list!([symbol!(["a"])], symbol!(["b"]))),
     ));
     assert!(test(
       parse_syn(),
       "(a, b, c)",
-      Some(list!([sym!(["a"]), sym!(["b"])], sym!(["c"]))),
+      Some(list!([symbol!(["a"]), symbol!(["b"])], symbol!(["c"]))),
     ));
     assert!(test(
       parse_syn(),
       "(a, (b, c))",
-      Some(list!([sym!(["a"]), sym!(["b"])], sym!(["c"]))),
+      Some(list!([symbol!(["a"]), symbol!(["b"])], symbol!(["c"]))),
     ));
     assert!(test(
       parse_syn(),
       "(a b c)",
-      Some(list!([sym!(["a"]), sym!(["b"]), sym!(["c"])])),
+      Some(list!([symbol!(["a"]), symbol!(["b"]), symbol!(["c"])])),
     ));
     assert!(test(
       parse_syn(),
@@ -535,24 +536,28 @@ pub mod tests {
       Some(list!([num!(Fr::from_le_bytes_canonical(&vec))])),
     ));
 
-    assert!(test(parse_syn(), ".\\.", Some(sym!(["."]))));
-    assert!(test(parse_syn(), ".\\'", Some(sym!(["'"]))));
+    assert!(test(parse_syn(), ".\\.", Some(symbol!(["."]))));
+    assert!(test(parse_syn(), ".\\'", Some(symbol!(["'"]))));
     assert!(test(
       parse_syn(),
       ".\\'\\u{8e}\\u{fffc}\\u{201b}",
-      Some(sym!(["'\u{8e}\u{fffc}\u{201b}"])),
+      Some(symbol!(["'\u{8e}\u{fffc}\u{201b}"])),
     ));
     assert!(test(
       parse_syn(),
       "(lambda (🚀) 🚀)",
-      Some(list!([sym!(["lambda"]), list!([sym!(["🚀"])]), sym!(["🚀"])])),
+      Some(list!([
+        symbol!(["lambda"]),
+        list!([symbol!(["🚀"])]),
+        symbol!(["🚀"])
+      ])),
     ));
     assert!(test(
       parse_syn(),
       "(_:, 11242421860377074631u64, :\u{ae}\u{60500}\u{87}..)",
       Some(list!(
-        [key!([]), u64!(11242421860377074631)],
-        key!(["®\u{60500}\u{87}", "", ""])
+        [keyword!([]), u64!(11242421860377074631)],
+        keyword!(["®\u{60500}\u{87}", "", ""])
       ))
     ));
   }

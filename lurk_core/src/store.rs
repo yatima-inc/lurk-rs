@@ -136,9 +136,6 @@ impl<F: LurkField> Store<F> {
     let Cid { tag, val } = cid;
     match (tag.expr, entry) {
       (_, Entry::Opaque) => self.intern_opaque_cid(cid, false),
-      (ExprTag::Cons, Entry::Expr(ldon::Expr::ConsNil)) if val == F::zero() => {
-        self.intern_expr(Expr::ConsNil)
-      },
       (ExprTag::Cons, Entry::Expr(ldon::Expr::Cons(car, cdr))) => {
         let car = self.intern_cid(car, ldon_store)?;
         let cdr = self.intern_cid(cdr, ldon_store)?;
@@ -339,7 +336,6 @@ impl<F: LurkField> Store<F> {
         let ptr = self.get_opaque_cid(*cid)?;
         self.get_expr(ptr)
       },
-      (ExprTag::Cons, RawPtr::Null) => Ok(Expr::ConsNil),
       (ExprTag::Cons, RawPtr::Index(idx)) => {
         let (car, cdr) =
           self.conses.get_index(idx).ok_or(LurkError::GetIndex(tag, idx))?;
@@ -524,11 +520,6 @@ impl<F: LurkField> Store<F> {
       },
       _ => {
         let (cid, expr) = match self.get_expr(ptr)? {
-          Expr::ConsNil => {
-            let expr = ldon::Expr::ConsNil;
-            let cid = expr.cid(&self.poseidon_cache);
-            Ok((cid, expr))
-          },
           Expr::Cons(car, cdr) => {
             let (car, _) = self.get_entry(car, ls.clone(), cache_mode)?;
             let (cdr, _) = self.get_entry(cdr, ls.clone(), cache_mode)?;
@@ -769,7 +760,7 @@ impl<F: LurkField> Store<F> {
   }
 
   pub fn intern_syn(&mut self, syn: &Syn<F>) -> Result<Ptr<F>, LurkError<F>> {
-    let mut ldon_store = ldon::Store::new();
+    let mut ldon_store = ldon::Store::default();
     let cid = ldon_store.insert_syn(&self.poseidon_cache, syn);
     self.intern_cid(cid, &ldon_store)
   }
@@ -851,7 +842,6 @@ impl<F: LurkField> Store<F> {
 
   pub fn intern_expr(&mut self, expr: Expr<F>) -> Result<Ptr<F>, LurkError<F>> {
     let (ptr, inserted) = match expr {
-      Expr::ConsNil => Ok((Ptr::null(ExprTag::Cons), false)),
       Expr::Cons(car, cdr) => {
         self.cache_if_opaque(car)?;
         self.cache_if_opaque(cdr)?;
@@ -1015,9 +1005,9 @@ impl<F: LurkField> Store<F> {
     Ok(ptr)
   }
 
-  pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
-    self.intern_expr(Expr::ConsNil)
-  }
+  // pub fn nil(&mut self) -> Result<Ptr<F>, LurkError<F>> {
+  //  self.intern_expr(Expr::ConsNil)
+  //}
 
   pub fn cons(
     &mut self,
@@ -1052,7 +1042,7 @@ impl<F: LurkField> Store<F> {
     ptr: Ptr<F>,
   ) -> Result<(Ptr<F>, Ptr<F>), LurkError<F>> {
     match self.get_expr(ptr)? {
-      Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
+      // Expr::ConsNil => Ok((self.nil()?, self.nil()?)),
       Expr::Cons(car, cdr) => Ok((car, cdr)),
       // TODO:
       // Expr::StrNil => Ok((self.strnil()?, self.strnil()?)),
@@ -1067,7 +1057,7 @@ impl<F: LurkField> Store<F> {
     &self,
     root: Ptr<F>,
   ) -> Result<ldon::Store<F>, LurkError<F>> {
-    let ldon_store = Rc::new(RefCell::new(ldon::Store::new()));
+    let ldon_store = Rc::new(RefCell::new(ldon::Store::default()));
     self.get_entry(root, Some(ldon_store.clone()), HashMode::Get)?;
     Ok(ldon_store.as_ref().clone().into_inner())
   }
@@ -1213,10 +1203,6 @@ pub mod test {
       syn1_ptr == syn2_ptr
     }
     else {
-      // println!("syn1 {}", syn1);
-      // println!("ptr1 {:?}", syn1_ptr);
-      // println!("syn2 {}", syn2);
-      // println!("ptr2 {:?}", syn2_ptr);
       syn1_ptr != syn2_ptr
     }
   }

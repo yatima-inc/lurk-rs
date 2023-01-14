@@ -213,10 +213,24 @@ impl LurkField for pasta_curves::Fq {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FWrap<F: LurkField>(pub F);
 
+impl<F: LurkField> Copy for FWrap<F> {}
+
 #[allow(clippy::derive_hash_xor_eq)]
 impl<F: LurkField> Hash for FWrap<F> {
   fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
     self.0.to_repr().as_ref().hash(state);
+  }
+}
+
+impl<F: LurkField> PartialOrd for FWrap<F> {
+  fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+    (self.0.to_repr().as_ref()).partial_cmp(&(other.0.to_repr().as_ref()))
+  }
+}
+
+impl<F: LurkField> Ord for FWrap<F> {
+  fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+    (self.0.to_repr().as_ref()).cmp(&(other.0.to_repr().as_ref()))
   }
 }
 

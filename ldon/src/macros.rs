@@ -43,8 +43,8 @@ macro_rules! char {
 
 #[allow(unused_macros)]
 #[macro_export]
-macro_rules! sym {
-    ([$( $x:literal ),*] ) => {
+macro_rules! symbol {
+    ([$( $x:expr ),*] ) => {
         {
             #[allow(unused_mut)]
             let mut temp_vec = Vec::new();
@@ -54,7 +54,7 @@ macro_rules! sym {
             $crate::syntax::Syn::Symbol(Pos::No, $crate::sym::Symbol::Sym(temp_vec))
         }
     };
-    ($f:ty,  [$( $x:literal ),*] ) => {
+    ($f:ty,  [$( $x:expr ),*] ) => {
         {
             #[allow(unused_mut)]
             let mut temp_vec = Vec::new();
@@ -66,9 +66,71 @@ macro_rules! sym {
     };
 }
 
+#[allow(unused_macros)]
+#[macro_export]
+macro_rules! sym {
+    [$( $x:expr ),*] => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::sym::Symbol::Sym(temp_vec)
+        }
+    };
+}
+
+#[allow(unused_macros)]
+#[macro_export]
+macro_rules! lurksym {
+    [$( $x:expr ),*] => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            temp_vec.push("lurk".to_string());
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::sym::Symbol::Sym(temp_vec)
+        }
+    };
+}
+
+#[allow(unused_macros)]
+#[macro_export]
+macro_rules! lurkkey {
+    [$( $x:expr ),*] => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            temp_vec.push("lurk".to_string());
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::sym::Symbol::Key(temp_vec)
+        }
+    };
+}
+
+#[allow(unused_macros)]
 #[macro_export]
 macro_rules! key {
-    ([$( $x:literal ),*] ) => {
+    [$( $x:expr ),*] => {
+        {
+            #[allow(unused_mut)]
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            $crate::sym::Symbol::Key(temp_vec)
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! keyword {
+    ([$( $x:expr ),*] ) => {
         {
             #[allow(unused_mut)]
             let mut temp_vec = Vec::new();
@@ -78,7 +140,7 @@ macro_rules! key {
             $crate::syntax::Syn::Symbol(Pos::No, $crate::sym::Symbol::Key(temp_vec))
         }
     };
-    ($f:ty,  [$( $x:literal ),*] ) => {
+    ($f:ty,  [$( $x:expr ),*] ) => {
         {
             #[allow(unused_mut)]
             let mut temp_vec = Vec::new();
@@ -99,7 +161,7 @@ macro_rules! list {
             $(
                 temp_vec.push($x);
             )*
-            $crate::syntax::Syn::List(Pos::No, temp_vec, Some(Box::new($end)))
+            $crate::syntax::Syn::List(Pos::No, temp_vec, Box::new($end))
         }
     };
     ([$( $x:expr ),*] ) => {
@@ -109,7 +171,7 @@ macro_rules! list {
             $(
                 temp_vec.push($x);
             )*
-            $crate::syntax::Syn::List(Pos::No, temp_vec, None)
+            $crate::syntax::Syn::List(Pos::No, temp_vec, Box::new($crate::syntax::Syn::Symbol(Pos::No, lurksym!["nil"])))
         }
     };
     ($f:ty,  [$( $x:expr ),*], $end:expr ) => {
@@ -119,7 +181,7 @@ macro_rules! list {
             $(
                 temp_vec.push($x);
             )*
-            $crate::syntax::Syn::<$f>::List(Pos::No, temp_vec, Some(Box::new($end)))
+            $crate::syntax::Syn::<$f>::List(Pos::No, temp_vec, Box::new($end))
         }
     };
     ($f:ty,  [$( $x:expr ),*] ) => {
@@ -129,7 +191,7 @@ macro_rules! list {
             $(
                 temp_vec.push($x);
             )*
-            $crate::syntax::Syn::<$f>::List(Pos::No, temp_vec, None)
+            $crate::syntax::Syn::<$f>::List(Pos::No, temp_vec, Box::new($crate::syntax::Syn::Symbol(Pos::No, lurksym!["nil"])))
         }
     };
 }

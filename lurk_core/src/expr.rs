@@ -15,7 +15,6 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr<F: LurkField> {
-  ConsNil,              //
   Cons(Ptr<F>, Ptr<F>), // car, cdr
   Comm(Ptr<F>, Ptr<F>), // secret, payload
   SymNil,

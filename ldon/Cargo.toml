@@ -37,4 +37,3 @@ lurk_ff = { path = "../lurk_ff", features = ["test-utils"] }
 rand = { version = "0.8" }
 quickcheck = { version = "1.0.3" }
 quickcheck_macros = { version = "1.0.0" }
-

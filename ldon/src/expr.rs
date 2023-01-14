@@ -21,7 +21,6 @@ use crate::{
 // user-level expressions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expr<F: LurkField> {
-  ConsNil,
   Cons(Cid<F>, Cid<F>),                   // car, cdr
   Comm(Cid<F>, Cid<F>),                   // secret, val
   SymNil,                                 //
@@ -60,7 +59,6 @@ impl<F: LurkField> Expr<F> {
   /// All the `Cid`s directly reachable from `expr`, if any.
   pub fn child_cids(&self) -> Vec<Cid<F>> {
     match self {
-      Expr::ConsNil => vec![],
       Expr::Cons(car, cdr) => vec![*car, *cdr],
       Expr::Comm(secret, payload) => vec![*secret, *payload],
       Expr::SymNil => vec![],
@@ -93,7 +91,6 @@ impl<F: LurkField> Expr<F> {
 
   pub fn cid(&self, cache: &PoseidonCache<F>) -> Cid<F> {
     match self {
-      Expr::ConsNil => Cid { tag: F::expr_tag(ExprTag::Cons), val: F::zero() },
       Expr::Cons(car, cdr) => Cid {
         tag: F::expr_tag(ExprTag::Cons),
         val: cache.hash4(&[
@@ -484,7 +481,6 @@ pub mod test_utils {
     fn arbitrary(g: &mut Gen) -> Self {
       #[allow(clippy::type_complexity)]
       let input: Vec<(i64, Box<dyn Fn(&mut Gen) -> Expr<Fr>>)> = vec![
-        (100, Box::new(|_| Self::ConsNil)),
         (100, Box::new(|g| Self::Cons(Cid::arbitrary(g), Cid::arbitrary(g)))),
         (100, Box::new(|g| Self::Comm(Cid::arbitrary(g), Cid::arbitrary(g)))),
         (100, Box::new(|_| Self::StrNil)),

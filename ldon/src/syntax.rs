@@ -4,6 +4,7 @@ use lurk_ff::field::LurkField;
 
 use crate::{
   hash::PoseidonCache,
+  lurksym,
   parser::position::Pos,
   store::Store,
   sym::Symbol,
@@ -24,7 +25,7 @@ pub enum Syn<F: LurkField> {
   Char(Pos, char),
   // A cons-list of expressions, which can be terminated by nil: (1 2 3)
   // or can be terminated with the right-most expression (1, 2, 3)
-  List(Pos, Vec<Syn<F>>, Option<Box<Syn<F>>>),
+  List(Pos, Vec<Syn<F>>, Box<Syn<F>>),
   // A map of expressions to expressions: { foo = 1, blue = true, 3 = 4 }
   Map(Pos, Vec<(Syn<F>, Syn<F>)>),
   // A contextual link or descriptor of some piece of foreign data:
@@ -42,9 +43,9 @@ impl<F: LurkField> Syn<F> {
     other: &Self,
     cache: &PoseidonCache<F>,
   ) -> core::cmp::Ordering {
-    let mut store = Store::new();
-    let self_ptr = store.insert_syn(cache, self);
-    let other_ptr = store.insert_syn(cache, other);
+    let mut store = Store::default();
+    let self_ptr = store.insert_syn(cache, &self);
+    let other_ptr = store.insert_syn(cache, &other);
     self_ptr.cmp(&other_ptr)
   }
 
@@ -81,7 +82,9 @@ impl<F: LurkField> fmt::Display for Syn<F> {
       Self::Symbol(_, sym) => write!(f, "{}", sym.print_escape()),
       Self::String(_, x) => write!(f, "\"{}\"", x.escape_default()),
       Self::Char(_, x) => write!(f, "'{}'", x.escape_default()),
-      Self::List(_, xs, None) => {
+      Self::List(_, xs, end)
+        if *end == Box::new(Syn::Symbol(Pos::No, lurksym!["nil"])) =>
+      {
         let mut iter = xs.iter().peekable();
         write!(f, "(")?;
         while let Some(x) = iter.next() {
@@ -92,7 +95,7 @@ impl<F: LurkField> fmt::Display for Syn<F> {
         }
         write!(f, ")")
       },
-      Self::List(_, xs, Some(end)) => {
+      Self::List(_, xs, end) => {
         let mut iter = xs.iter().peekable();
         write!(f, "(")?;
         while let Some(x) = iter.next() {
@@ -207,10 +210,16 @@ pub mod test_utils {
       let end = exprs.pop();
       if improper && num_exprs >= 2 && !matches!(end, Some(Syn::List(_, _, _)))
       {
-        Syn::List(Pos::No, exprs, end.map(Box::new))
+        Syn::List(Pos::No, exprs, Box::new(end.unwrap()))
       }
       else {
-        Syn::List(Pos::No, exprs, None)
+        let nil = Syn::Symbol(Pos::No, lurksym!["nil"]);
+        if exprs.is_empty() {
+          nil
+        }
+        else {
+          Syn::List(Pos::No, exprs, Box::new(nil))
+        }
       }
     }
 
@@ -252,12 +261,12 @@ mod test {
   #[allow(unused_imports)]
   use crate::{
     char,
-    key,
+    keyword,
     list,
     map,
     num,
     str,
-    sym,
+    symbol,
     u64,
   };
 
@@ -274,23 +283,23 @@ mod test {
 
   #[test]
   fn unit_syn_print() {
-    assert!(test_print(sym!([]), "_."));
-    assert!(test_print(sym!(Fr, []), "_."));
-    assert!(test_print(key!([]), "_:"));
-    assert!(test_print(key!(Fr, []), "_:"));
-    assert!(test_print(sym!([""]), "."));
-    assert!(test_print(key!([""]), ":"));
-    assert!(test_print(sym!(["foo"]), "foo"));
-    assert!(test_print(sym!(["fλoo"]), "fλoo"));
-    assert!(test_print(sym!(["foo", ""]), "foo."));
-    assert!(test_print(sym!(["foo", "", ""]), "foo.."));
-    assert!(test_print(sym!(["", "foo"]), "..foo"));
-    assert!(test_print(sym!(["", "", "foo"]), "...foo"));
-    assert!(test_print(key!(["foo"]), ":foo"));
-    assert!(test_print(key!(["foo", ""]), ":foo."));
-    assert!(test_print(key!(["foo", "", ""]), ":foo.."));
-    assert!(test_print(key!(["", "foo"]), ":.foo"));
-    assert!(test_print(key!(["", "", "foo"]), ":..foo"));
+    assert!(test_print(symbol!([]), "_."));
+    assert!(test_print(symbol!(Fr, []), "_."));
+    assert!(test_print(keyword!([]), "_:"));
+    assert!(test_print(keyword!(Fr, []), "_:"));
+    assert!(test_print(symbol!([""]), "."));
+    assert!(test_print(keyword!([""]), ":"));
+    assert!(test_print(symbol!(["foo"]), "foo"));
+    assert!(test_print(symbol!(["fλoo"]), "fλoo"));
+    assert!(test_print(symbol!(["foo", ""]), "foo."));
+    assert!(test_print(symbol!(["foo", "", ""]), "foo.."));
+    assert!(test_print(symbol!(["", "foo"]), "..foo"));
+    assert!(test_print(symbol!(["", "", "foo"]), "...foo"));
+    assert!(test_print(keyword!(["foo"]), ":foo"));
+    assert!(test_print(keyword!(["foo", ""]), ":foo."));
+    assert!(test_print(keyword!(["foo", "", ""]), ":foo.."));
+    assert!(test_print(keyword!(["", "foo"]), ":.foo"));
+    assert!(test_print(keyword!(["", "", "foo"]), ":..foo"));
     assert!(test_print(list!([]), "()"));
     assert!(test_print(list!(Fr, []), "()"));
     assert!(test_print(list!([u64!(1), u64!(2), u64!(3)]), "(1u64 2u64 3u64)"));
@@ -300,9 +309,9 @@ mod test {
     ));
     assert!(test_print(
       map!([
-        (sym!(["a"]), u64!(1)),
-        (sym!(["b"]), u64!(2)),
-        (sym!(["c"]), u64!(3))
+        (symbol!(["a"]), u64!(1)),
+        (symbol!(["b"]), u64!(2)),
+        (symbol!(["c"]), u64!(3))
       ]),
       "{a = 1u64, b = 2u64, c = 3u64}"
     ));
@@ -312,8 +321,7 @@ mod test {
   fn prop_syn_generates(syn: Syn<Fr>) -> bool {
     // println!("-------------");
     let mut store1 = Store::<Fr>::default();
-    let cache = PoseidonCache::default();
-    let _ptr1 = store1.insert_syn(&cache, &syn);
+    let _ptr1 = store1.insert_syn(&PoseidonCache::default(), &syn);
     true
   }
 }
