@@ -370,7 +370,7 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
     let mut symbol_cids: BTreeSet<Cid<F>> = BTreeSet::new();
     for sym in &self.package.symbols {
       let cid = Store::hash_symbol(&PoseidonCache::default(), sym);
-      println!("ser_f sym cid {} {}", sym, cid);
+      // println!("ser_f sym cid {} {}", sym, cid);
       symbol_cids.insert(cid);
     }
     let mut syms: Vec<F> = Vec::new();
@@ -408,9 +408,9 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
     // opaque pointers in the store, but maybe we don't care about that.
     // TODO: Harden for wasm32-unknown-unknown compilation
     let syms: usize = syms as usize;
-    println!("syms {}", syms);
+    // println!("syms {}", syms);
     let opaqs: usize = opaqs as usize;
-    println!("opaqs {}", opaqs);
+    // println!("opaqs {}", opaqs);
     if fs.len() < opaqs {
       return Err(SerdeFError::UnexpectedEnd);
     }
@@ -432,7 +432,7 @@ impl<F: LurkField> SerdeF<F> for Store<F> {
     let mut store =
       Store::new(Package::empty(), map, &PoseidonCache::default());
     for cid in sym_cids {
-      println!("sym cid {}", cid);
+      // println!("sym cid {}", cid);
       let sym = store
         .get_symbol(cid)
         .map_err(|_| SerdeFError::Custom("MalformedStore".to_string()))?;
@@ -494,6 +494,8 @@ mod test {
     symbol,
     u64,
   };
+
+  use quickcheck::{Gen, Arbitrary};
 
   #[test]
   fn unit_expr_store_get() {
@@ -557,6 +559,7 @@ mod test {
       Symbol::Sym(vec!["foo".to_string(), "bar".to_string()]),
     ));
   }
+
   #[test]
   fn unit_syn_store_demo() {
     // (lambda (x) x)
@@ -589,95 +592,23 @@ mod test {
     let cache = PoseidonCache::default();
     let cid1 = store1.insert_syn(&cache, &syn1);
     let syn2 = store1.get_syn(cid1);
-    println!("{:?}", syn1);
-    println!("{:?}", syn2);
+    // println!("{:?}", syn1);
+    // println!("{:?}", syn2);
     syn1 == syn2.unwrap()
   }
 
   #[test]
-  fn unit_syn_store_serdef() {
-    let mut store1 = Store::<Fr>::default();
+  fn unit_store_serdef() {
+    let mut store = Store::<Fr>::default();
     let cache = PoseidonCache::default();
-
-    let mut test = |syn1| {
-      let _cid = store1.insert_syn(&cache, &syn1);
-      let vec = &store1.ser_f();
-      println!("syn: {:?}", syn1);
-      println!("store: {}", store1);
-      println!("vec: {:?} {:?}", vec.len(), vec);
-      match Store::de_f(&vec) {
-        Ok(store2) => {
-          println!("store1: {}", store1);
-          println!("store2: {}", store2);
-          assert!(store1 == store2)
-        },
-        Err(e) => {
-          println!("{:?}", e);
-          assert!(false)
-        },
-      }
-    };
-
-    test(Syn::Num(Pos::No, 0u64.into()));
-    // test(Syn::U64(Pos::No, 0u64.into()));
-    // test(Syn::Char(Pos::No, 'a'));
-    // test(Syn::String(Pos::No, "".to_string()));
-    // test(Syn::String(Pos::No, "a".to_string()));
-    // test(Syn::String(Pos::No, "ab".to_string()));
-    // test(Syn::List(
-    //  Pos::No,
-    //  vec![Syn::Num(Pos::No, 0u64.into())],
-    //  Box::new(Syn::Symbol(Pos::No, lurksym!["nil"])),
-    //));
-    // test(Syn::List(
-    //  Pos::No,
-    //  vec![Syn::Num(Pos::No, 0u64.into())],
-    //  Box::new(Syn::Num(Pos::No, 0u64.into())),
-    //));
-    // test(Syn::Symbol(Pos::No, Symbol::Sym(vec![])));
-    // test(Syn::Symbol(Pos::No, Symbol::Sym(vec!["foo".to_string()])));
-    // test(Syn::Symbol(
-    //  Pos::No,
-    //  Symbol::Sym(vec!["foo".to_string(), "bar".to_string()]),
-    //));
-  }
-
-  #[quickcheck]
-  fn prop_syn_store_serdef(syn1: Syn<Fr>) -> bool {
-    println!("==================");
-    let mut store1 = Store::<Fr>::default();
-    let cache = PoseidonCache::default();
-    store1.insert_syn(&cache, &syn1);
-    let vec = &store1.ser_f();
-    match Store::de_f(&vec) {
-      Ok(store2) => {
-        println!("store1: {}", store1);
-        println!("store2: {}", store2);
-        store1 == store2
-      },
-      Err(e) => {
-        println!("{:?}", e);
-        false
-      },
+    let mut g = Gen::new(999999);
+    for _ in 0..999 {
+      let syn = Syn::arbitrary(&mut g);
+      store.insert_syn(&cache, &syn);
     }
+    let vec = store.ser_f();
+    let store1 = Store::de_f(&vec).unwrap();
+    assert_eq!(store, store1);
   }
-  #[quickcheck]
-  fn prop_store_serdef(store1: Store<Fr>) -> bool {
-    println!("==================");
-    let vec = &store1.ser_f();
-    // println!("vec: {:?}", store1);
-    match Store::de_f(&vec) {
-      Ok(store2) => {
-        println!("store1: {}", store1);
-        println!("store1 package: {:?}", store1.package);
-        println!("store2: {}", store2);
-        println!("store2 package: {:?}", store1.package);
-        store1 == store2
-      },
-      Err(e) => {
-        println!("{:?}", e);
-        false
-      },
-    }
-  }
+
 }
